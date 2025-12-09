@@ -6,7 +6,6 @@ filelock
 HTMLParser
 ipython
 ipywidgets
-jnius
 keyring
 pandas
 protobuf
