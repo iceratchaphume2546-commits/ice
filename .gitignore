@@ -1,1 +1,19 @@
-/dataverse
+# Python
+__pycache__/
+*.pyc
+
+# Virtual env
+venv/
+.env/
+
+# Credentials
+*.json
+*.key
+
+# Others
+.DS_Store
+# Export files
+dataverse/
+dataverse_export.csv
+dataverse_export.nljson
+
