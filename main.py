@@ -6,6 +6,7 @@ from datetime import datetime
 import pytz
 from google.cloud import storage
 import re
+from flask import Flask, jsonify
 
 # ----------------------
 # โหลด .env
@@ -104,7 +105,6 @@ def clean_columns(df):
 # ฟังก์ชันอัปโหลด DataFrame ขึ้น GCS
 # -----------------------------
 def upload_to_gcs(df, folder, filename):
-    # ข้ามการอัปโหลดไฟล์บางไฟล์
     skip_files = ["product_lines.ndjson", "itsm_adses.ndjson"]
     if filename.lower() in skip_files:
         print(f"ข้ามการอัปโหลด {filename}")
@@ -116,4 +116,63 @@ def upload_to_gcs(df, folder, filename):
     blob = bucket.blob(path)
 
     temp = "temp.ndjson"
-    df
+    df.to_json(temp, orient="records", lines=True, force_ascii=False)
+    blob.upload_from_filename(temp)
+    print(f"อัปโหลดสำเร็จ → gs://{GCS_BUCKET_NAME}/{path}")
+
+# -----------------------------
+# ฟังก์ชันรัน entity เดียว
+# -----------------------------
+def run_entity(api_name):
+    folder_name = api_name.replace("itsm_ads_", "")
+    print(f"\n===== เริ่มประมวลผล: {folder_name.upper()} =====")
+    token = get_access_token()
+    data = fetch_dataverse_data(token, api_name)
+    df = pd.DataFrame(data)
+    df = clean_columns(df)
+    print(f"จำนวนแถว: {len(df)}, จำนวนคอลัมน์: {len(df.columns)}")
+    upload_to_gcs(df, folder_name, f"{folder_name}.ndjson")
+
+def run(folder_name, api_name):
+    print(f"\n===== เริ่มประมวลผล: {folder_name.upper()} =====")
+    token = get_access_token()
+    data = fetch_dataverse_data(token, api_name)
+    df = pd.DataFrame(data)
+    df = clean_columns_for_bq(df)
+    print(f"จำนวนแถว: {len(df)}, จำนวนคอลัมน์: {len(df.columns)}")
+    upload_to_gcs(df, folder_name, f"{folder_name.split('/')[-1]}.ndjson")
+
+# -----------------------------
+# ฟังก์ชันรันทุก entity ภายใต้ dim()
+# -----------------------------
+def dim():
+    entities = [
+        "itsm_ads_products",
+        "itsm_ads_channels",
+        "itsm_ads_pages",
+        "itsm_ads_kols"
+    ]
+    for api_name in entities:
+        run_entity(api_name)
+
+# -----------------------------
+# Flask app สำหรับ Cloud Run Scheduler
+# -----------------------------
+app = Flask(__name__)
+
+@app.route("/", methods=["GET", "POST"])
+def run_all():
+    try:
+        # รันตาม script เดิม
+        run("ads/header", "itsm_adses")
+        run("ads/line", "itsm_ads_product_lines")
+        dim()
+        return jsonify({"status": "success", "message": "Dataverse job finished!"}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+# -----------------------------
+# รัน Flask server
+# -----------------------------
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
