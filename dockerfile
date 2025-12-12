@@ -1,17 +1,16 @@
-# ใช้ image python เบา ๆ
-FROM python:3.11-slim
+# ใช้ image python
+FROM python:3.14
  
-# กำหนด working directory
 WORKDIR /app
  
-# คัดลอกทุกไฟล์จาก repo เข้า container
 COPY . .
+
+# คัดลอก credential ลง container
+COPY itsm-pipeline-bac89c675c5e.json /app/itsm-pipeline-bac89c675c5e.json
+
+RUN pip install --no-cache-dir -r requirements.txt
  
-# ติดตั้ง dependencies
-RUN pip install --no-cache-dir -r requirements.txt || true
- 
-# ตั้ง environment variable (Cloud Run จะ override ได้ภายหลัง)
 ENV PYTHONUNBUFFERED=1
- 
-# รัน script หลักของ pipeline
-CMD ["python", "sync_erp_data.py"]
+
+CMD ["python", "main.py"]
+
