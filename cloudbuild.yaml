@@ -26,3 +26,6 @@ steps:
 images:
   - asia.gcr.io/$PROJECT_ID/dataverse-main
   - asia.gcr.io/$PROJECT_ID/dataverse-dim
+
+options:
+  logging: CLOUD_LOGGING_ONLY
