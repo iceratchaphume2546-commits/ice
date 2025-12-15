@@ -13,6 +13,12 @@ import re
 load_dotenv()
 
 # -----------------------------
+# ตั้งค่า path ของ JSON key สำหรับ GCS
+# -----------------------------
+# ให้แน่ใจว่าไฟล์ gcp-key.json อยู่ใน container /app
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/app/gcp-key.json"
+
+# -----------------------------
 # Environment variables
 # -----------------------------
 GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME", "hongthai")
@@ -84,7 +90,7 @@ def clean_columns_for_bq(df):
 # Upload GCS
 # -----------------------------
 def upload_to_gcs(df, folder, filename):
-    client = storage.Client()
+    client = storage.Client()  # จะใช้ key ที่ตั้งค่าไว้ด้านบน
     bucket = client.bucket(GCS_BUCKET_NAME)
     path = f"{folder}/{filename}"
     blob = bucket.blob(path)
