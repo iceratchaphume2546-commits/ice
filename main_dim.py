@@ -6,6 +6,8 @@ from datetime import datetime
 import pytz
 from google.cloud import storage
 import re
+import os
+import requests
 
 # ----------------------
 # โหลด .env
@@ -126,5 +128,23 @@ if __name__ == "__main__":
 
         df = clean_columns_for_bq(df)
         upload_to_gcs(df, folder, f"{folder.split('/')[-1]}.ndjson")
+        
+def get_access_token():
+    tenant_id = os.getenv("TENANT_ID")
+    client_id = os.getenv("CLIENT_ID")
+    client_secret = os.getenv("CLIENT_SECRET")
+    scope = os.getenv("SCOPE")
 
-    print("🎉 FULL LOAD DIM เสร็จสมบูรณ์")
+    url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
+    data = {
+        "grant_type": "client_credentials",
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "scope": scope
+    }
+    r = requests.post(url, data=data)
+    r.raise_for_status()
+    return r.json()["access_token"]
+
+
+print("🎉 FULL LOAD DIM เสร็จสมบูรณ์")
