@@ -1,16 +1,22 @@
 import os
 import pandas as pd
 import requests
-from dotenv import load_dotenv
 from datetime import datetime
 import pytz
 from google.cloud import storage
 import re
 
-# -----------------------------
-# โหลด .env
-# -----------------------------
-load_dotenv()
+# ❌ ไม่ต้อง load_dotenv ใน Cloud Run
+# from dotenv import load_dotenv
+# load_dotenv()
+
+GCS_BUCKET_NAME = os.environ["GCS_BUCKET_NAME"]
+TENANT_ID = os.environ["TENANT_ID"]
+CLIENT_ID = os.environ["CLIENT_ID"]
+CLIENT_SECRET = os.environ["CLIENT_SECRET"]
+DATAVERSE_URL = os.environ["DATAVERSE_URL"]
+SCOPE = os.environ["SCOPE"]
+
 
 # -----------------------------
 # ตั้งค่า path ของ JSON key สำหรับ GCS
