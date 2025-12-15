@@ -8,7 +8,7 @@ from google.cloud import storage
 import re
 
 # ----------------------
-# โหลด .env
+# โหลด .env (local ใช้ / Cloud Run ไม่กระทบ)
 # ----------------------
 load_dotenv()
 
@@ -16,10 +16,6 @@ load_dotenv()
 # Environment variables
 # ----------------------
 GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME", "hongthai")
-CREDENTIAL_PATH = os.getenv(
-    "GCS_CREDENTIAL_JSON",
-    r"C:\Users\User\Desktop\gitgit\ice\itsm-pipeline-bac89c675c5e.json"
-)
 
 TENANT_ID = os.getenv("TENANT_ID")
 CLIENT_ID = os.getenv("CLIENT_ID")
@@ -34,12 +30,10 @@ def now_th(fmt=None):
     now = datetime.utcnow().replace(tzinfo=pytz.utc).astimezone(tz)
     return now.strftime(fmt) if fmt else now
 
-
 def now_th_iso():
     tz = pytz.timezone("Asia/Bangkok")
     now = datetime.now(tz)
     return now.strftime("%Y-%m-%dT%H:%M:%SZ")
-
 
 YEAR = now_th("%Y")
 MONTH = now_th("%m")
@@ -56,9 +50,9 @@ def get_access_token():
         "grant_type": "client_credentials",
         "scope": f"{DATAVERSE_URL}/.default"
     }
-    response = requests.post(url, data=payload)
-    response.raise_for_status()
-    return response.json()["access_token"]
+    r = requests.post(url, data=payload)
+    r.raise_for_status()
+    return r.json()["access_token"]
 
 # -----------------------------
 # ดึงข้อมูลจาก Dataverse
@@ -79,9 +73,9 @@ def fetch_dataverse_data(token, api_name):
     while url:
         r = requests.get(url, headers=headers)
         r.raise_for_status()
-        json_data = r.json()
-        data.extend(json_data.get("value", []))
-        url = json_data.get("@odata.nextLink")
+        js = r.json()
+        data.extend(js.get("value", []))
+        url = js.get("@odata.nextLink")
 
     return data
 
@@ -102,25 +96,29 @@ def clean_columns_for_bq(df):
 def upload_to_gcs(df, folder, filename):
     skip_files = ["product_lines.ndjson", "itsm_adses.ndjson"]
     if filename.lower() in skip_files:
-        print(f"ข้ามการอัปโหลด {filename}")
+        print(f"⏭ ข้ามการอัปโหลด {filename}")
         return
 
     path = f"{folder}/{YEAR}/{MONTH}/{DAY}/{filename}"
-    client = storage.Client.from_service_account_json(CREDENTIAL_PATH)
+
+    # ใช้ Application Default Credentials (Cloud Run)
+    client = storage.Client()
     bucket = client.bucket(GCS_BUCKET_NAME)
     blob = bucket.blob(path)
 
-    temp = "temp.ndjson"
-    df.to_json(temp, orient="records", lines=True, force_ascii=False)
-    blob.upload_from_filename(temp)
+    temp_file = "temp.ndjson"
+    df.to_json(temp_file, orient="records", lines=True, force_ascii=False)
+    blob.upload_from_filename(temp_file)
 
-    print(f"อัปโหลดสำเร็จ → gs://{GCS_BUCKET_NAME}/{path}")
+    os.remove(temp_file)
+
+    print(f" อัปโหลดสำเร็จ → gs://{GCS_BUCKET_NAME}/{path}")
 
 # -----------------------------
-# MAIN EXECUTION
+# MAIN (Cloud Run Job ต้องจบตรงนี้)
 # -----------------------------
 if __name__ == "__main__":
-    print("เริ่มรัน Dataverse → GCS")
+    print(" เริ่มรัน Dataverse → GCS")
 
     token = get_access_token()
 
@@ -130,16 +128,17 @@ if __name__ == "__main__":
     }
 
     for folder, api_name in entities.items():
-        print(f"\nกำลังดึงข้อมูล {api_name}")
+        print(f"\n กำลังดึงข้อมูล {api_name}")
         data = fetch_dataverse_data(token, api_name)
-        df = pd.DataFrame(data)
 
-        if df.empty:
-            print("ไม่มีข้อมูล")
+        if not data:
+            print(" ไม่มีข้อมูล")
             continue
 
+        df = pd.DataFrame(data)
         df = clean_columns_for_bq(df)
+
         filename = f"{folder.split('/')[-1]}.ndjson"
         upload_to_gcs(df, folder, filename)
 
-    print("รันเสร็จสมบูรณ์")
+    print("🎉 รันเสร็จสมบูรณ์ – Job จบการทำงาน")
