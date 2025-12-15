@@ -35,7 +35,7 @@ DATAVERSE_URL = os.getenv("DATAVERSE_URL")
 SCOPE = os.getenv("SCOPE")  # ต้องตั้งค่าเป็น https://yourorg.crm.dynamics.com/.default
 
 # -----------------------------
-# ฟังก์ชันเวลาแบบ Bangkok
+# ฟังก์ชันเวลาแบบ Bangkokk
 # -----------------------------
 def now_th(fmt=None):
     tz = pytz.timezone("Asia/Bangkok")
