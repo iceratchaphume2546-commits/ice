@@ -1,4 +1,4 @@
-# Dockerfile.dim
+# Dockerfile.dimm
 FROM python:3.14
 
 WORKDIR /app
