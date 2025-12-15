@@ -2,33 +2,26 @@ steps:
   # Image สำหรับ main.py
   - name: gcr.io/cloud-builders/docker
     args:
-      [
-        "build",
-        "-t",
-        "asia.gcr.io/$PROJECT_ID/dataverse-main",
-        "-f",
-        "Dockerfile",
-        "."
-      ]
+      - build
+      - -t
+      - asia.gcr.io/$PROJECT_ID/dataverse-main
+      - -f
+      - Dockerfile
+      - .
 
   # Image สำหรับ main_dim.py
   - name: gcr.io/cloud-builders/docker
     args:
-      [
-        "build",
-        "-t",
-        "asia.gcr.io/$PROJECT_ID/dataverse-dim",
-        "-f",
-        "Dockerfile.dim",
-        "."
-      ]
+      - build
+      - -t
+      - asia.gcr.io/$PROJECT_ID/dataverse-dim
+      - -f
+      - Dockerfile.dim
+      - .
 
 images:
   - asia.gcr.io/$PROJECT_ID/dataverse-main
   - asia.gcr.io/$PROJECT_ID/dataverse-dim
 
-logsBucket: gs://$PROJECT_ID-cloudbuild-logs
-
 options:
   logging: CLOUD_LOGGING_ONLY
-
