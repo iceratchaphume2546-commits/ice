@@ -48,7 +48,7 @@ def now_th_iso():
     return now.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 # -----------------------------
-# ขอ access token จาก Azure AD
+# ขอ access token จาก Azure ADd
 # -----------------------------
 def get_access_token():
     url = f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token"
