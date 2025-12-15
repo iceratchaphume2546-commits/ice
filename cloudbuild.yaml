@@ -11,7 +11,7 @@ steps:
         "."
       ]
 
-  # Build image สำหรับ main_dim.pyy
+  # Build image สำหรับ main_dim.pyyy
   - name: gcr.io/cloud-builders/docker
     args:
       [
