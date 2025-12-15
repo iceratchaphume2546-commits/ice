@@ -1,5 +1,5 @@
 steps:
-  # Build image สำหรับ main.py
+  # build image main.py
   - name: gcr.io/cloud-builders/docker
     args:
       [
@@ -11,7 +11,7 @@ steps:
         "."
       ]
 
-  # Build image สำหรับ main_dim.pyyyy
+  # build image main_dim.py
   - name: gcr.io/cloud-builders/docker
     args:
       [
