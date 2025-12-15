@@ -1,19 +1,17 @@
-# Python
+# env & secrets
+.env
+*.json
+
+# data output
+*.csv
+*.ndjson
+*.nljson
+
+# temp
+temp*
+dataverse_export*
+
+# python
 __pycache__/
 *.pyc
-
-# Virtual env
-venv/
-.env/
-
-# Credentials
-*.json
-*.key
-
-# Others
-.DS_Store
-# Export files
-dataverse/
-dataverse_export.csv
-dataverse_export.nljson
 
