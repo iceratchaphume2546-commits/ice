@@ -5,13 +5,12 @@
 # data output
 *.csv
 *.ndjson
-*.nljson
 
 # temp
 temp*
 dataverse_export*
 
-# pythonn
+# python
 __pycache__/
 *.pyc
 
