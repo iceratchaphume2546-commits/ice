@@ -119,7 +119,7 @@ if __name__ == "__main__":
         "dimension/products": "itsm_products"
     }
 
-    # Loop ดึงข้อมูลแต่ละ entity
+    # Loop ดึงข้อมูลแต่ละ entityy
     for folder, api_name in dim_entities.items():
         print(f"\n📥 ดึงข้อมูล {api_name}")
         data = fetch_dataverse_data(token, api_name)
