@@ -1,36 +1,23 @@
 import os
 from dotenv import load_dotenv
-
-load_dotenv()  # 👈 ต้องอยู่ก่อนใช้ storage.Client()
-
 from google.cloud import storage
 from datetime import datetime
 import pandas as pd
 import tempfile
 
-
 # -----------------------------
-# Load env
+# ENV
 # -----------------------------
 load_dotenv()
 GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME")
 
 # -----------------------------
-# GCS upload (FULL LOAD)
+# GCS upload
 # -----------------------------
 def upload_to_gcs(df: pd.DataFrame, base_folder: str, filename: str):
-    if df.empty:
-        print(f"⚠️ Skip {filename} (empty dataframe)")
-        return
-
     now = datetime.now()
-    year = now.strftime("%Y")
-    month = now.strftime("%m")
-    day = now.strftime("%d")
+    gcs_path = f"{base_folder}/{now:%Y/%m/%d}/{filename}"
 
-    gcs_path = f"{base_folder}/{year}/{month}/{day}/{filename}"
-
-    # ✅ temp file ที่ใช้ได้ทุก OS
     with tempfile.NamedTemporaryFile(
         mode="w",
         suffix=".ndjson",
@@ -42,57 +29,92 @@ def upload_to_gcs(df: pd.DataFrame, base_folder: str, filename: str):
 
     client = storage.Client()
     bucket = client.bucket(GCS_BUCKET_NAME)
-    blob = bucket.blob(gcs_path)
-    blob.upload_from_filename(temp_path)
+    bucket.blob(gcs_path).upload_from_filename(temp_path)
 
     os.remove(temp_path)
     print(f"✅ Uploaded → gs://{GCS_BUCKET_NAME}/{gcs_path}")
 
 # -----------------------------
-# FETCH FUNCTIONS (DIM)
+# LOAD SOURCE
 # -----------------------------
-def fetch_products() -> pd.DataFrame:
-    print("📥 Fetch products")
-    return pd.DataFrame([
-        {"product_id": 1, "product_name": "Product A"},
-        {"product_id": 2, "product_name": "Product B"},
-    ])
-
-def fetch_kols() -> pd.DataFrame:
-    print("📥 Fetch kols")
-    return pd.DataFrame([
-        {"kol_id": 101, "kol_name": "KOL A"},
-        {"kol_id": 102, "kol_name": "KOL B"},
-    ])
-
-def fetch_channels() -> pd.DataFrame:
-    print("📥 Fetch channels")
-    return pd.DataFrame([
-        {"channel_id": 201, "channel_name": "Facebook"},
-        {"channel_id": 202, "channel_name": "TikTok"},
-    ])
-
-def fetch_pages() -> pd.DataFrame:
-    print("📥 Fetch pages")
-    return pd.DataFrame([
-        {"page_id": 301, "page_name": "Page A"},
-        {"page_id": 302, "page_name": "Page B"},
-    ])
+def load_source(path: str) -> pd.DataFrame:
+    print("📥 Load dataverse_export.ndjson")
+    df = pd.read_json(path, lines=True)
+    print("🔎 Source columns:", list(df.columns))
+    return df
 
 # -----------------------------
-# MAIN (FULL LOAD ONCE)
+# BUILD DIMs
+# -----------------------------
+def build_products(df):
+    if "itsm_product_name" not in df.columns:
+        return pd.DataFrame(columns=["product_id", "product_name"])
+
+    return (
+        df[["itsm_product_name"]]
+        .dropna()
+        .drop_duplicates()
+        .reset_index(drop=True)
+        .assign(product_id=lambda x: x.index + 1)
+        .rename(columns={"itsm_product_name": "product_name"})
+        [["product_id", "product_name"]]
+    )
+
+def build_channels(df):
+    if "itsm_channel_name" not in df.columns:
+        return pd.DataFrame(columns=["channel_id", "channel_name"])
+
+    return (
+        df[["itsm_channel_name"]]
+        .dropna()
+        .drop_duplicates()
+        .reset_index(drop=True)
+        .assign(channel_id=lambda x: x.index + 1)
+        .rename(columns={"itsm_channel_name": "channel_name"})
+        [["channel_id", "channel_name"]]
+    )
+
+def build_pages(df):
+    if "itsm_page_name" not in df.columns:
+        return pd.DataFrame(columns=["page_id", "page_name"])
+
+    return (
+        df[["itsm_page_name"]]
+        .dropna()
+        .drop_duplicates()
+        .reset_index(drop=True)
+        .assign(page_id=lambda x: x.index + 1)
+        .rename(columns={"itsm_page_name": "page_name"})
+        [["page_id", "page_name"]]
+    )
+
+def build_kols(df):
+    """
+    ⚠️ ตอนนี้ยังไม่มี kol จริง
+    → สร้าง DIM เปล่าพร้อม schema ไว้ก่อน
+    """
+    print("🧩 Build kols (prepare for future)")
+
+    kol_columns = ["kol_id", "kol_name"]
+    return pd.DataFrame(columns=kol_columns)
+
+# -----------------------------
+# MAIN
 # -----------------------------
 if __name__ == "__main__":
-    print("🚀 Start FULL LOAD DIM → GCS")
+    print("🚀 Start FULL LOAD 4DIM → GCS")
 
-    df_products = fetch_products()
-    df_kols = fetch_kols()
-    df_channels = fetch_channels()
-    df_pages = fetch_pages()
+    df_source = load_source("dataverse_export.ndjson")
 
-    upload_to_gcs(df_products, "products", "products.ndjson")
-    upload_to_gcs(df_kols, "kols", "kols.ndjson")
-    upload_to_gcs(df_channels, "channels", "channels.ndjson")
-    upload_to_gcs(df_pages, "pages", "pages.ndjson")
+    df_products = build_products(df_source)
+    df_channels = build_channels(df_source)
+    df_pages = build_pages(df_source)
+    df_kols = build_kols(df_source)
 
-    print("🎉 FULL LOAD DIM FINISHED")
+    upload_to_gcs(df_products, "4dim/products", "products.ndjson")
+    upload_to_gcs(df_kols, "4dim/kols", "kols.ndjson")
+    upload_to_gcs(df_channels, "4dim/channels", "channels.ndjson")
+    upload_to_gcs(df_pages, "4dim/pages", "pages.ndjson")
+
+    print("🎉 FULL LOAD 4DIM FINISHED")
+
