@@ -2,11 +2,7 @@ FROM python:3.14-slim
 
 WORKDIR /app
 
-# copy โค้ดทั้งหมด
-COPY . /app
-
-# copy ไฟล์ GCS key เข้า container
-COPY itsm-pipeline-bac89c675c5e.json /app/itsm-pipeline-bac89c675c5e.json
+COPY . .
 
 # ติดตั้ง dependencies
 RUN pip install --no-cache-dir -r requirements.txt
