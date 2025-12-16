@@ -1,23 +1,19 @@
-# ใช้ Python 3.14 base image
+# ใช้ Python 3.14 เป็น base image
 FROM python:3.14
 
-# Set working directory
+# ตั้ง working directory
 WORKDIR /app
 
-# Copy source code ไปยัง container
-COPY main_dim.py .
-COPY requirements.txt .
+# คัดลอกไฟล์ทั้งหมดลงใน container
+COPY . .
 
-# Install dependencies
+# ติดตั้ง dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Environment variable สำหรับ GCS bucket และ path ของ service account
-ENV GCS_BUCKET_NAME=hongthai
-ENV GOOGLE_APPLICATION_CREDENTIALS=/app/gcs-temp-key.json
+# ตั้งค่าให้ Python output แบบ unbuffered (ช่วยให้ log ขึ้นทันที)
+ENV PYTHONUNBUFFERED=1
 
-# Copy service account JSON (ต้องใส่จริงตอน build หรือ mount เป็น secret บน Cloud Run)
-COPY gcs-temp-key.json /app/gcs-temp-key.json
-
-# Command รัน main script
+# รัน main_dim.py แทน main.py
 CMD ["python", "main_dim.py"]
+
 
