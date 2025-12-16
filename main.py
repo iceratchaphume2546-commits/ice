@@ -86,8 +86,7 @@ def clean_columns_for_bq(df):
     df.columns = [re.sub(r"[^\w]", "_", c).lower() for c in df.columns]
     df.columns = [
         c if c[0].isalpha() or c[0] == "_" else f"col_{i}"
-        for i, c in enumerate(df.columns)
-    ]
+        for i, c in enumerate(df.columns)]
     return df
 
 # -----------------------------
