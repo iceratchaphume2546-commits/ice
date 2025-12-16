@@ -1,8 +1,9 @@
 import os
+import json
 import pandas as pd
 import requests
 from dotenv import load_dotenv
-from datetime import datetime
+from datetime import datetime, timezone
 import pytz
 from google.cloud import storage
 import re
@@ -23,23 +24,24 @@ CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 DATAVERSE_URL = os.getenv("DATAVERSE_URL")
 
+# ----------------------
+# ตั้งค่า GCS Credentials แบบ temp file
+# ----------------------
 if not GCS_KEY_PATH or not os.path.exists(GCS_KEY_PATH):
-    raise ValueError("❌ ไม่พบไฟล์ GCS_KEY_PATH ใน .env หรือ path ไม่ถูกต้อง")
-else:
-    print(f"✅ ใช้ GCS credentials จาก: {GCS_KEY_PATH}")
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = GCS_KEY_PATH
-
+    raise ValueError("❌ ไม่มี GCS_JSON_KEY ใน .env")
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = GCS_KEY_PATH
+print(f"ใช้ GCS credentials จาก: {GCS_KEY_PATH}")
 # -----------------------------
 # เวลา Bangkok
 # -----------------------------
 def now_th(fmt=None):
     tz = pytz.timezone("Asia/Bangkok")
-    now = datetime.utcnow().replace(tzinfo=pytz.utc).astimezone(tz)
+    now = datetime.now(timezone.utc).astimezone(tz)
     return now.strftime(fmt) if fmt else now
 
 def now_th_iso():
     tz = pytz.timezone("Asia/Bangkok")
-    now = datetime.now(tz)
+    now = datetime.now(timezone.utc).astimezone(tz)
     return now.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 YEAR = now_th("%Y")
@@ -47,5 +49,98 @@ MONTH = now_th("%m")
 DAY = now_th("%d")
 
 # -----------------------------
-#
+# ขอ access token จาก Azure AD
+# -----------------------------
+def get_access_token():
+    url = f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token"
+    payload = {
+        "client_id": CLIENT_ID,
+        "client_secret": CLIENT_SECRET,
+        "grant_type": "client_credentials",
+        "scope": f"{DATAVERSE_URL}/.default"
+    }
+    r = requests.post(url, data=payload)
+    r.raise_for_status()
+    return r.json()["access_token"]
+
+# -----------------------------
+# ดึงข้อมูลจาก Dataverse
+# -----------------------------
+def fetch_dataverse_data(token, api_name):
+    time_now = now_th_iso()
+    url = url = (
+        f"{DATAVERSE_URL}/api/data/v9.2/{api_name}"
+        f"?$filter=modifiedon lt '{time_now}'"
+    )
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/json"
+    }
+    data = []
+    while url:
+        r = requests.get(url, headers=headers)
+        r.raise_for_status
+        js = r.json()
+        data.extend(js.get("value", []))
+        url = js.get("@odata.nextLink")
+    return data
+
+# -----------------------------
+# ปรับชื่อคอลัมน์ให้ BigQuery-safe
+# -----------------------------
+def clean_columns_for_bq(df):
+    df.columns = [re.sub(r"[^\w]", "_", c).lower() for c in df.columns]
+    df.columns = [c if c[0].isalpha() or c[0] == "_" else f"col_{i}" for i, c in enumerate(df.columns)]
+    return df
+
+# -----------------------------
+# อัปโหลด DataFrame ขึ้น GCS
+# -----------------------------
+def upload_to_gcs(df, folder, filename):
+   
+    path = f"{folder}/{YEAR}/{MONTH}/{DAY}/{filename}"
+    client = storage.Client()
+    bucket = client.bucket(GCS_BUCKET_NAME)
+    blob = bucket.blob(path)
+
+    temp_file = "temp.ndjson"
+    df.to_json(temp_file, orient="records", lines=True, force_ascii=False)
+    blob.upload_from_filename(temp_file)
+    
+    os.remove(temp_file)
+    
+    print(f"✅ อัปโหลด → gs://{GCS_BUCKET_NAME}/{path}")
+
+# -----------------------------
+# MAIN (Full Load DIM)
+# -----------------------------
+if __name__ == "__main__":
+    print(f"🚀 เริ่ม FULL LOAD DIM: {now_th('%Y-%m-%d %H:%M:%S')}")
+
+    token = get_access_token()
+
+    # Mapping DIM → Dataverse entity
+    entities = {
+        "channels": "itsm_ads_channels",
+        "kols": "itsm_ads_kols",
+        "pages": "itsm_ads_pages",
+        "products": "itsm_ads_products"
+    }
+
+    for folder, api_name in entities.items():
+        print(f"\n📥 ดึงข้อมูล {api_name}")
+        data = fetch_dataverse_data(token, api_name)
+        
+        if not data:
+            print(f"⚠️ ไม่มีข้อมูล {api_name}")
+            continue
+        
+        df = pd.DataFrame(data)
+        df = clean_columns_for_bq(df)
+        
+        filename = f"{folder.split('/')}.ndjson"
+        upload_to_gcs(df, folder, filename)
+
+    print("🎉 FULL LOAD DIM เสร็จสมบูรณ์")
 

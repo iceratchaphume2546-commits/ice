@@ -1,11 +1,15 @@
-# Dockerfile.dimmm
-FROM python:3.14
+FROM python:3.14-slim
 
 WORKDIR /app
-COPY . .
 
+# copy โค้ดทั้งหมด
+COPY . /app
+
+# copy ไฟล์ GCS key เข้า container
+COPY itsm-pipeline-bac89c675c5e.json /app/itsm-pipeline-bac89c675c5e.json
+
+# ติดตั้ง dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-ENV PYTHONUNBUFFERED=1
-
 CMD ["python", "main_dim.py"]
+
