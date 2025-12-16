@@ -1,36 +1,19 @@
-version: "3.9"
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/ice-main:latest', '-f', 'Dockerfile', '.']
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/ice-dim:latest', '-f', 'Dockerfiledim', '.']
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/ice-main:latest']
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/ice-dim:latest']
 
-services:
-  main:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: main
-    environment:
-      GCS_BUCKET_NAME: ${GCS_BUCKET_NAME}
-      TENANT_ID: ${TENANT_ID}
-      CLIENT_ID: ${CLIENT_ID}
-      CLIENT_SECRET: ${CLIENT_SECRET}
-      DATAVERSE_URL: ${DATAVERSE_URL}
-      SCOPE: ${SCOPE}
-    volumes:
-      - ./dataverse:/app/dataverse  # mount โฟลเดอร์โค้ด ถ้าจำเป็น
-    command: python main.py
+images:
+  - 'gcr.io/$PROJECT_ID/ice-main:latest'
+  - 'gcr.io/$PROJECT_ID/ice-dim:latest'
 
-  dim:
-    build:
-      context: .
-      dockerfile: Dockerfiledim
-    container_name: dockerfiledim
-    environment:
-      GCS_BUCKET_NAME: ${GCS_BUCKET_NAME}
-      TENANT_ID: ${TENANT_ID}
-      CLIENT_ID: ${CLIENT_ID}
-      CLIENT_SECRET: ${CLIENT_SECRET}
-      DATAVERSE_URL: ${DATAVERSE_URL}
-      SCOPE: ${SCOPE}
-      GOOGLE_APPLICATION_CREDENTIALS: /app/gcp-key.json
-    volumes:
-      - ./gcp-key.json:/app/gcp-key.json:ro   # mount JSON key สำหรับ GCS
-      - ./dataverse:/app/dataverse            # mount code folder
-    command: python main_dim.py
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+serviceAccount: 'dataverse-access@itsm-pipeline.iam.gserviceaccount.com'
+
