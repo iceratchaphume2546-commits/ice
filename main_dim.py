@@ -4,118 +4,118 @@ from google.cloud import storage
 from datetime import datetime
 import pandas as pd
 import tempfile
+import json
 
 # -----------------------------
-# ENV
+# Load env
 # -----------------------------
 load_dotenv()
-GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME")
+GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME", "hongthai")
+DATAVERSE_FILE = "dataverse_export.ndjson"
 
 # -----------------------------
-# GCS upload
+# GCS upload function
 # -----------------------------
 def upload_to_gcs(df: pd.DataFrame, base_folder: str, filename: str):
-    now = datetime.now()
-    gcs_path = f"{base_folder}/{now:%Y/%m/%d}/{filename}"
+    if df.empty:
+        print(f"⚠️ Skip {base_folder}/{filename} (empty dataframe)")
+        return
 
-    with tempfile.NamedTemporaryFile(
-        mode="w",
-        suffix=".ndjson",
-        delete=False,
-        encoding="utf-8"
-    ) as tmp:
+    now = datetime.now()
+    year = now.strftime("%Y")
+    month = now.strftime("%m")
+    day = now.strftime("%d")
+
+    gcs_path = f"{base_folder}/{year}/{month}/{day}/{filename}"
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".ndjson", delete=False, encoding="utf-8") as tmp:
         df.to_json(tmp.name, orient="records", lines=True, force_ascii=False)
         temp_path = tmp.name
 
     client = storage.Client()
     bucket = client.bucket(GCS_BUCKET_NAME)
-    bucket.blob(gcs_path).upload_from_filename(temp_path)
+    blob = bucket.blob(gcs_path)
+    blob.upload_from_filename(temp_path)
 
     os.remove(temp_path)
     print(f"✅ Uploaded → gs://{GCS_BUCKET_NAME}/{gcs_path}")
 
 # -----------------------------
-# LOAD SOURCE
+# Build DIM dataframes from source
 # -----------------------------
-def load_source(path: str) -> pd.DataFrame:
-    print("📥 Load dataverse_export.ndjson")
-    df = pd.read_json(path, lines=True)
-    print("🔎 Source columns:", list(df.columns))
-    return df
+def build_products(df: pd.DataFrame) -> pd.DataFrame:
+    columns_map = {
+        "itsm_product_name": "product_name",
+        "itsm_id": "product_id"
+    }
+    df = df.rename(columns=columns_map)
+    required_cols = ["product_id", "product_name"]
+    if all(col in df.columns for col in required_cols):
+        return df[required_cols]
+    print("⚠️ product columns not found")
+    return pd.DataFrame()
 
-# -----------------------------
-# BUILD DIMs
-# -----------------------------
-def build_products(df):
-    if "itsm_product_name" not in df.columns:
-        print("⚠️ product columns not found")
-        return pd.DataFrame(columns=["product_id", "product_name"])
+def build_kols(df: pd.DataFrame) -> pd.DataFrame:
+    columns_map = {
+        "itsm_id": "kol_id",
+        "itsm_subid2": "kol_name"  # สมมติใช้ subid2 เป็นชื่อ kol
+    }
+    df = df.rename(columns=columns_map)
+    required_cols = ["kol_id", "kol_name"]
+    if all(col in df.columns for col in required_cols):
+        return df[required_cols]
+    print("⚠️ kol columns not found")
+    return pd.DataFrame()
 
-    return (
-        df[["itsm_product_name"]]
-        .dropna()
-        .drop_duplicates()
-        .reset_index(drop=True)
-        .assign(product_id=lambda x: x.index + 1)
-        .rename(columns={"itsm_product_name": "product_name"})
-        [["product_id", "product_name"]]
-    )
+def build_channels(df: pd.DataFrame) -> pd.DataFrame:
+    columns_map = {
+        "itsm_channel_name": "channel_name",
+        "itsm_id": "channel_id"
+    }
+    df = df.rename(columns=columns_map)
+    required_cols = ["channel_id", "channel_name"]
+    if all(col in df.columns for col in required_cols):
+        return df[required_cols]
+    print("⚠️ channel columns not found")
+    return pd.DataFrame()
 
-def build_channels(df):
-    if "itsm_channel_name" not in df.columns:
-        print("⚠️ channel columns not found")
-        return pd.DataFrame(columns=["channel_id", "channel_name"])
-
-    return (
-        df[["itsm_channel_name"]]
-        .dropna()
-        .drop_duplicates()
-        .reset_index(drop=True)
-        .assign(channel_id=lambda x: x.index + 1)
-        .rename(columns={"itsm_channel_name": "channel_name"})
-        [["channel_id", "channel_name"]]
-    )
-
-def build_pages(df):
-    if "itsm_page_name" not in df.columns:
-        print("⚠️ page columns not found")
-        return pd.DataFrame(columns=["page_id", "page_name"])
-
-    return (
-        df[["itsm_page_name"]]
-        .dropna()
-        .drop_duplicates()
-        .reset_index(drop=True)
-        .assign(page_id=lambda x: x.index + 1)
-        .rename(columns={"itsm_page_name": "page_name"})
-        [["page_id", "page_name"]]
-    )
-
-def build_kols(df):
-    """
-    ตอนนี้ยังไม่มี kol ใน source
-    → สร้าง DIM เปล่าพร้อม schema ไว้ก่อน
-    """
-    print("🧩 Build kols (prepare for future)")
-    return pd.DataFrame(columns=["kol_id", "kol_name"])
+def build_pages(df: pd.DataFrame) -> pd.DataFrame:
+    columns_map = {
+        "itsm_page_name": "page_name",
+        "itsm_id": "page_id"
+    }
+    df = df.rename(columns=columns_map)
+    required_cols = ["page_id", "page_name"]
+    if all(col in df.columns for col in required_cols):
+        return df[required_cols]
+    print("⚠️ page columns not found")
+    return pd.DataFrame()
 
 # -----------------------------
 # MAIN
 # -----------------------------
 if __name__ == "__main__":
-    print("🚀 Start FULL LOAD DIM → GCS")
+    print("🚀 Start FULL LOAD 4DIM → GCS")
 
-    df_source = load_source("dataverse_export.ndjson")
+    if not os.path.exists(DATAVERSE_FILE):
+        raise FileNotFoundError(f"{DATAVERSE_FILE} not found in current folder.")
 
+    # Load dataverse_export.ndjson
+    print(f"📥 Load {DATAVERSE_FILE}")
+    df_source = pd.read_json(DATAVERSE_FILE, lines=True)
+    print(f"🔎 Source columns: {list(df_source.columns)}")
+
+    # Build DIMs
     df_products = build_products(df_source)
     df_kols = build_kols(df_source)
     df_channels = build_channels(df_source)
     df_pages = build_pages(df_source)
 
+    # Upload to GCS
     upload_to_gcs(df_products, "products", "products.ndjson")
     upload_to_gcs(df_kols, "kols", "kols.ndjson")
     upload_to_gcs(df_channels, "channels", "channels.ndjson")
     upload_to_gcs(df_pages, "pages", "pages.ndjson")
 
-    print("🎉 FULL LOAD DIM FINISHED")
+    print("🎉 FULL LOAD 4DIM FINISHED")
 
