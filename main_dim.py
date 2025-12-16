@@ -48,7 +48,7 @@ def now_th_iso():
     return now.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 # -----------------------------
-# ขอ access token จาก Azure ADd
+# ขอ access token จาก Azure AD
 # -----------------------------
 def get_access_token():
     url = f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token"
@@ -125,7 +125,7 @@ if __name__ == "__main__":
         "dimension/products": "itsm_products"
     }
 
-    # Loop ดึงข้อมูลแต่ละ entityy
+    # Loop ดึงข้อมูลแต่ละ entity
     for folder, api_name in dim_entities.items():
         print(f"\n📥 ดึงข้อมูล {api_name}")
         data = fetch_dataverse_data(token, api_name)
@@ -136,6 +136,9 @@ if __name__ == "__main__":
             continue
 
         df = clean_columns_for_bq(df)
-        upload_to_gcs(df, folder, f"{folder.split('/')[-1]}.ndjson")
+
+        # เพิ่มวันที่ในชื่อไฟล์
+        today = now_th(fmt="%Y%m%d")
+        upload_to_gcs(df, folder, f"{folder.split('/')[-1]}_{today}.ndjson")
 
     print("🎉 FULL LOAD DIM เสร็จสมบูรณ์")
