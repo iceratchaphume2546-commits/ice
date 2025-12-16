@@ -1,0 +1,36 @@
+version: "3.9"
+
+services:
+  main:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: main
+    environment:
+      GCS_BUCKET_NAME: ${GCS_BUCKET_NAME}
+      TENANT_ID: ${TENANT_ID}
+      CLIENT_ID: ${CLIENT_ID}
+      CLIENT_SECRET: ${CLIENT_SECRET}
+      DATAVERSE_URL: ${DATAVERSE_URL}
+      SCOPE: ${SCOPE}
+    volumes:
+      - ./dataverse:/app/dataverse  # mount โฟลเดอร์โค้ด ถ้าจำเป็น
+    command: python main.py
+
+  dim:
+    build:
+      context: .
+      dockerfile: Dockerfiledim
+    container_name: dockerfiledim
+    environment:
+      GCS_BUCKET_NAME: ${GCS_BUCKET_NAME}
+      TENANT_ID: ${TENANT_ID}
+      CLIENT_ID: ${CLIENT_ID}
+      CLIENT_SECRET: ${CLIENT_SECRET}
+      DATAVERSE_URL: ${DATAVERSE_URL}
+      SCOPE: ${SCOPE}
+      GOOGLE_APPLICATION_CREDENTIALS: /app/gcp-key.json
+    volumes:
+      - ./gcp-key.json:/app/gcp-key.json:ro   # mount JSON key สำหรับ GCS
+      - ./dataverse:/app/dataverse            # mount code folder
+    command: python main_dim.py
