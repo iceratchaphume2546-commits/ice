@@ -1,5 +1,4 @@
 import os
-import json
 import pandas as pd
 import requests
 from dotenv import load_dotenv
@@ -17,20 +16,13 @@ load_dotenv()
 # Environment variables
 # ----------------------
 GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME", "hongthai")
-GCS_KEY_PATH = os.getenv("GCS_KEY_PATH")
+
 
 TENANT_ID = os.getenv("TENANT_ID")
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 DATAVERSE_URL = os.getenv("DATAVERSE_URL")
 
-# ----------------------
-# ตั้งค่า GCS Credentials แบบ temp file
-# ----------------------
-if not GCS_KEY_PATH or not os.path.exists(GCS_KEY_PATH):
-    raise ValueError("❌ ไม่มี GCS_JSON_KEY ใน .env")
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = GCS_KEY_PATH
-print(f"ใช้ GCS credentials จาก: {GCS_KEY_PATH}")
 # -----------------------------
 # เวลา Bangkok
 # -----------------------------
