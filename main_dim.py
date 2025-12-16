@@ -9,7 +9,7 @@ import re
 
 # ----------------------
 # โหลด .env
-# ----------------------
+# ---------------------
 load_dotenv()
 
 # ----------------------
@@ -131,7 +131,7 @@ if __name__ == "__main__":
         df = pd.DataFrame(data)
         df = clean_columns_for_bq(df)
         
-        filename = f"{folder.split('/')}.ndjson"
+        filename = f"{folder.split('/')[-1]}.ndjson"
         upload_to_gcs(df, folder, filename)
 
     print("🎉 FULL LOAD DIM เสร็จสมบูรณ์")
