@@ -20,7 +20,7 @@ images:
   - 'gcr.io/$PROJECT_ID/ice-dim:latest'
 
 options:
-  logging: CLOUD_LOGGING_ONLY   # ✅ แก้ error invalid argument
+  logging: CLOUD_LOGGING_ONLY   
 
 serviceAccount: 'dataverse-access@itsm-pipeline.iam.gserviceaccount.com'
 
