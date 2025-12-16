@@ -2,13 +2,13 @@
 steps:
   # Build Docker image สำหรับ main
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', 'gcr.io/$PROJECT_ID/ice-main:latest', '-f', 'Dockerfile', '.']
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/ice-main:latest', '-f', 'ICE/Dockerfile', 'ICE']
 
   # Build Docker image สำหรับ dim
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', 'gcr.io/$PROJECT_ID/ice-dim:latest', '-f', 'Dockerfiledim', '.']
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/ice-dim:latest', '-f', 'ICE/Dockerfiledim', 'ICE']
 
-  # Push ทั้งสอง image ไป Google Container Registry
+  # Push ทั้งสอง image ไป Container Registry
   - name: 'gcr.io/cloud-builders/docker'
     args: ['push', 'gcr.io/$PROJECT_ID/ice-main:latest']
 
@@ -20,8 +20,6 @@ images:
   - 'gcr.io/$PROJECT_ID/ice-dim:latest'
 
 options:
-  logging: CLOUD_LOGGING_ONLY   
+  logging: CLOUD_LOGGING_ONLY
 
 serviceAccount: 'dataverse-access@itsm-pipeline.iam.gserviceaccount.com'
-
-
