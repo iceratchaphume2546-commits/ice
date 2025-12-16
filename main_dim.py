@@ -48,6 +48,7 @@ def load_source(path: str) -> pd.DataFrame:
 # -----------------------------
 def build_products(df):
     if "itsm_product_name" not in df.columns:
+        print("⚠️ product columns not found")
         return pd.DataFrame(columns=["product_id", "product_name"])
 
     return (
@@ -62,6 +63,7 @@ def build_products(df):
 
 def build_channels(df):
     if "itsm_channel_name" not in df.columns:
+        print("⚠️ channel columns not found")
         return pd.DataFrame(columns=["channel_id", "channel_name"])
 
     return (
@@ -76,6 +78,7 @@ def build_channels(df):
 
 def build_pages(df):
     if "itsm_page_name" not in df.columns:
+        print("⚠️ page columns not found")
         return pd.DataFrame(columns=["page_id", "page_name"])
 
     return (
@@ -90,31 +93,29 @@ def build_pages(df):
 
 def build_kols(df):
     """
-    ⚠️ ตอนนี้ยังไม่มี kol จริง
+    ตอนนี้ยังไม่มี kol ใน source
     → สร้าง DIM เปล่าพร้อม schema ไว้ก่อน
     """
     print("🧩 Build kols (prepare for future)")
-
-    kol_columns = ["kol_id", "kol_name"]
-    return pd.DataFrame(columns=kol_columns)
+    return pd.DataFrame(columns=["kol_id", "kol_name"])
 
 # -----------------------------
 # MAIN
 # -----------------------------
 if __name__ == "__main__":
-    print("🚀 Start FULL LOAD 4DIM → GCS")
+    print("🚀 Start FULL LOAD DIM → GCS")
 
     df_source = load_source("dataverse_export.ndjson")
 
     df_products = build_products(df_source)
+    df_kols = build_kols(df_source)
     df_channels = build_channels(df_source)
     df_pages = build_pages(df_source)
-    df_kols = build_kols(df_source)
 
-    upload_to_gcs(df_products, "4dim/products", "products.ndjson")
-    upload_to_gcs(df_kols, "4dim/kols", "kols.ndjson")
-    upload_to_gcs(df_channels, "4dim/channels", "channels.ndjson")
-    upload_to_gcs(df_pages, "4dim/pages", "pages.ndjson")
+    upload_to_gcs(df_products, "products", "products.ndjson")
+    upload_to_gcs(df_kols, "kols", "kols.ndjson")
+    upload_to_gcs(df_channels, "channels", "channels.ndjson")
+    upload_to_gcs(df_pages, "pages", "pages.ndjson")
 
-    print("🎉 FULL LOAD 4DIM FINISHED")
+    print("🎉 FULL LOAD DIM FINISHED")
 
