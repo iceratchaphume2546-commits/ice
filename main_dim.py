@@ -61,7 +61,6 @@ def load_dataverse():
             raise FileNotFoundError(f"{DATAVERSE_GCS_PATH} not found or cannot be loaded. {e}")
         tmp_path = tmp.name
     return pd.read_json(tmp_path, lines=True)
-
 # -----------------------------
 # BUILD DIM DATAFRAMES
 # -----------------------------
