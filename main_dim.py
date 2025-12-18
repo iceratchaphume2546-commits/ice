@@ -1,112 +1,135 @@
 import os
 import pandas as pd
 from datetime import datetime
-import tempfile
+import pytz
+from google.cloud import storage
+import re
 
-# เปิด GCS เฉพาะตอนจำเป็น
-try:
-    from google.cloud import storage
-except ImportError:
-    storage = None
-
-# =========================
+# ----------------------
 # CONFIG
-# =========================
-MODE = os.getenv("MODE", "LOCAL")   # LOCAL | GCS
-GCS_BUCKET = "hongthai"
+# ----------------------
+GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME", "hongthai")
 SOURCE_FILE = "dataverse_export.ndjson"
 
-# =========================
-# DIM CONFIG
-# =========================
-DIM_CONFIG = {
-    "products": {
-        "cols": {
-            "itsm_ads_product_lineid": "product_id",
-            "itsm_product_name": "product_name",
-        }
-    },
-    "channels": {
-        "cols": {
-            "_itsm_channel_value": "channel_id",
-            "itsm_channel_name": "channel_name",
-        }
-    },
-    "pages": {
-        "cols": {
-            "_itsm_pagename_value": "page_id",
-            "itsm_page_name": "page_name",
-        }
-    },
-    "kols": {
-        "cols": {
-            "_itsm_agentpost_value": "kol_id",
-        }
-    },
-}
+# ----------------------
+# Time (Asia/Bangkok)
+# ----------------------
+def now_th(fmt):
+    tz = pytz.timezone("Asia/Bangkok")
+    return datetime.now(tz).strftime(fmt)
 
-# =========================
-# LOAD SOURCE (LOCAL ONLY)
-# =========================
+YEAR = now_th("%Y")
+MONTH = now_th("%m")
+DAY = now_th("%d")
+
+# ----------------------
+# Load source (LOCAL เหมือน main.py logic)
+# ----------------------
 def load_source():
-    print(f"📥 Load {SOURCE_FILE} (local)")
+    print("📥 Load dataverse_export.ndjson (local)")
+
+    if not os.path.exists(SOURCE_FILE):
+        raise FileNotFoundError(f"{SOURCE_FILE} not found")
+
     df = pd.read_json(SOURCE_FILE, lines=True)
     print("🔎 Source columns:", list(df.columns))
     return df
 
-# =========================
-# BUILD DIM (GENERIC)
-# =========================
-def build_dim(df, config):
-    if not all(c in df.columns for c in config["cols"]):
+# ----------------------
+# Clean column names (BigQuery-safe)
+# ----------------------
+def clean_columns(df):
+    df = df.copy()
+    df.columns = [re.sub(r"[^\w]", "_", c).lower() for c in df.columns]
+    df.columns = [
+        c if c[0].isalpha() or c[0] == "_" else f"col_{i}"
+        for i, c in enumerate(df.columns)
+    ]
+    return df
+
+# ----------------------
+# Build DIM (ฟังก์ชันเดียว ใช้ loop)
+# ----------------------
+DIM_CONFIG = {
+    "products": {
+        "id": "itsm_ads_product_lineid",
+        "name": "itsm_product_name",
+    },
+    "channels": {
+        "id": "_itsm_channel_value",
+        "name": "itsm_channel_name",
+    },
+    "pages": {
+        "id": "_itsm_pagename_value",
+        "name": "itsm_page_name",
+    },
+    "kols": {
+        "id": "_itsm_agentpost_value",
+        "name": "_itsm_agentpost_value",  # ตอนนี้ยังไม่มีชื่อจริง
+    },
+}
+
+def build_dim(df, dim_name, cfg):
+    id_col = cfg["id"]
+    name_col = cfg["name"]
+
+    if id_col not in df.columns:
+        print(f"⚠️ Skip {dim_name} (missing {id_col})")
         return pd.DataFrame()
 
-    out = df.rename(columns=config["cols"])
-    out = out[list(config["cols"].values())]
-    return out.drop_duplicates()
+    cols = [id_col]
+    if name_col in df.columns:
+        cols.append(name_col)
 
-# =========================
-# WRITE OUTPUT (FULL LOAD)
-# =========================
-def write_output(df, dim_name):
+    dim_df = (
+        df[cols]
+        .dropna()
+        .drop_duplicates()
+        .rename(columns={
+            id_col: f"{dim_name[:-1]}_id",
+            name_col: f"{dim_name[:-1]}_name"
+        })
+    )
+
+    return clean_columns(dim_df)
+
+# ----------------------
+# Upload to GCS (FULL LOAD, overwrite)
+# ----------------------
+def upload_to_gcs(df, folder):
     if df.empty:
-        print(f"⚠️ Skip {dim_name} (empty)")
+        print(f"⚠️ Skip {folder} (empty)")
         return
 
-    today = datetime.now()
-    path = f"{dim_name}/{today:%Y/%m/%d}/{dim_name}.ndjson"
+    path = f"{folder}/{YEAR}/{MONTH}/{DAY}/{folder}.ndjson"
 
-    if MODE == "LOCAL":
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        df.to_json(path, orient="records", lines=True, force_ascii=False)
-        print(f"💾 Saved local → {path}")
+    client = storage.Client()  # ADC เหมือน main.py
+    bucket = client.bucket(GCS_BUCKET_NAME)
+    blob = bucket.blob(path)
 
-    elif MODE == "GCS":
-        if storage is None:
-            raise RuntimeError("google-cloud-storage not installed")
+    temp_file = "temp.ndjson"
+    df.to_json(
+        temp_file,
+        orient="records",
+        lines=True,
+        force_ascii=False
+    )
 
-        client = storage.Client()
-        bucket = client.bucket(GCS_BUCKET)
-        blob = bucket.blob(path)
+    blob.upload_from_filename(temp_file)
+    os.remove(temp_file)
 
-        with tempfile.NamedTemporaryFile(
-            mode="w", delete=False, encoding="utf-8"
-        ) as tmp:
-            df.to_json(tmp.name, orient="records", lines=True, force_ascii=False)
-            blob.upload_from_filename(tmp.name)
+    print(f"✅ Uploaded → gs://{GCS_BUCKET_NAME}/{path}")
 
-        print(f"☁️ Uploaded → gs://{GCS_BUCKET}/{path}")
-
-# =========================
+# ----------------------
 # MAIN
-# =========================
+# ----------------------
 if __name__ == "__main__":
     print("🚀 Start FULL LOAD DIM")
 
     df_source = load_source()
 
     for dim_name, cfg in DIM_CONFIG.items():
-        df_dim = build_dim(df_source, cfg)
-        write_output(df_dim, dim_name)
+        df_dim = build_dim(df_source, dim_name, cfg)
+        upload_to_gcs(df_dim, dim_name)
 
-    print("🎉 DONE")
+    print("🎉 FULL LOAD DIM FINISHED")
