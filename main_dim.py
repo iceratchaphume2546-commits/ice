@@ -2,7 +2,6 @@ import os
 import json
 import requests
 import pandas as pd
-from datetime import datetime
 from google.cloud import storage
 from dotenv import load_dotenv
 import tempfile
@@ -86,7 +85,6 @@ def full_load(entity_name, entity_set, token):
         r = requests.get(url, headers=headers)
         r.raise_for_status()
         data = r.json()
-
         rows.extend(data.get("value", []))
         url = data.get("@odata.nextLink")
 
@@ -96,21 +94,19 @@ def full_load(entity_name, entity_set, token):
 
     df = pd.DataFrame(rows)
 
-    today = datetime.now().strftime("%Y/%m/%d")
-
     # ใช้ temp folder ของระบบ
     local_path = os.path.join(tempfile.gettempdir(), f"{entity_name}.ndjson")
 
     with open(local_path, "w", encoding="utf-8") as f:
         for _, row in df.iterrows():
-            clean_row = clean_dict(row.to_dict())   # ✅ ทำความสะอาด field names
+            clean_row = clean_dict(row.to_dict())  # ทำความสะอาด field names
             f.write(json.dumps(clean_row, ensure_ascii=False) + "\n")
 
     client = storage.Client()
     bucket = client.bucket(GCS_BUCKET)
-    
-    # 🔥 แก้ path ตาม request: root folder = entity_name
-    blob_path = f"{entity_name}/{today}/{entity_name}.ndjson"
+
+    # 🔥 อัปโหลดตรงๆ ในโฟลเดอร์ของ entity (ไม่มีปี/เดือน/วัน)
+    blob_path = f"{entity_name}/{entity_name}.ndjson"
     blob = bucket.blob(blob_path)
     blob.upload_from_filename(local_path)
 
@@ -127,3 +123,4 @@ if __name__ == "__main__":
     for name, entity in ENTITIES.items():
         full_load(name, entity, token)
 
+    print("🎉 DONE")
