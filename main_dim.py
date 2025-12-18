@@ -1,135 +1,102 @@
 import os
+import json
+import requests
 import pandas as pd
 from datetime import datetime
-import pytz
 from google.cloud import storage
-import re
+from dotenv import load_dotenv
+import tempfile
 
-# ----------------------
+# =============================
+# LOAD ENV (local)
+# =============================
+if os.path.exists(".env"):
+    load_dotenv()
+
+# =============================
 # CONFIG
-# ----------------------
-GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME", "hongthai")
-SOURCE_FILE = "dataverse_export.ndjson"
+# =============================
+BASE_URL = "https://itsmdev.crm5.dynamics.com/api/data/v9.2"
+GCS_BUCKET = os.getenv("GCS_BUCKET_NAME")
 
-# ----------------------
-# Time (Asia/Bangkok)
-# ----------------------
-def now_th(fmt):
-    tz = pytz.timezone("Asia/Bangkok")
-    return datetime.now(tz).strftime(fmt)
-
-YEAR = now_th("%Y")
-MONTH = now_th("%m")
-DAY = now_th("%d")
-
-# ----------------------
-# Load source (LOCAL เหมือน main.py logic)
-# ----------------------
-def load_source():
-    print("📥 Load dataverse_export.ndjson (local)")
-
-    if not os.path.exists(SOURCE_FILE):
-        raise FileNotFoundError(f"{SOURCE_FILE} not found")
-
-    df = pd.read_json(SOURCE_FILE, lines=True)
-    print("🔎 Source columns:", list(df.columns))
-    return df
-
-# ----------------------
-# Clean column names (BigQuery-safe)
-# ----------------------
-def clean_columns(df):
-    df = df.copy()
-    df.columns = [re.sub(r"[^\w]", "_", c).lower() for c in df.columns]
-    df.columns = [
-        c if c[0].isalpha() or c[0] == "_" else f"col_{i}"
-        for i, c in enumerate(df.columns)
-    ]
-    return df
-
-# ----------------------
-# Build DIM (ฟังก์ชันเดียว ใช้ loop)
-# ----------------------
-DIM_CONFIG = {
-    "products": {
-        "id": "itsm_ads_product_lineid",
-        "name": "itsm_product_name",
-    },
-    "channels": {
-        "id": "_itsm_channel_value",
-        "name": "itsm_channel_name",
-    },
-    "pages": {
-        "id": "_itsm_pagename_value",
-        "name": "itsm_page_name",
-    },
-    "kols": {
-        "id": "_itsm_agentpost_value",
-        "name": "_itsm_agentpost_value",  # ตอนนี้ยังไม่มีชื่อจริง
-    },
+ENTITIES = {
+    "products": "itsm_ads_products",
+    "channels": "itsm_ads_channels",
+    "pages": "itsm_ads_pages",
+    "kols": "itsm_ads_kols",
 }
 
-def build_dim(df, dim_name, cfg):
-    id_col = cfg["id"]
-    name_col = cfg["name"]
+# =============================
+# GET DATAVERSE TOKEN
+# =============================
+def get_token():
+    url = f"https://login.microsoftonline.com/{os.getenv('TENANT_ID')}/oauth2/v2.0/token"
+    data = {
+        "client_id": os.getenv("CLIENT_ID"),
+        "client_secret": os.getenv("CLIENT_SECRET"),
+        "scope": "https://itsmdev.crm5.dynamics.com/.default",
+        "grant_type": "client_credentials",
+    }
+    r = requests.post(url, data=data)
+    r.raise_for_status()
+    return r.json()["access_token"]
 
-    if id_col not in df.columns:
-        print(f"⚠️ Skip {dim_name} (missing {id_col})")
-        return pd.DataFrame()
+# =============================
+# FETCH + UPLOAD (FULL LOAD)
+# =============================
+def full_load(entity_name, entity_set, token):
+    print(f"📥 Fetch {entity_name}")
 
-    cols = [id_col]
-    if name_col in df.columns:
-        cols.append(name_col)
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/json"
+    }
 
-    dim_df = (
-        df[cols]
-        .dropna()
-        .drop_duplicates()
-        .rename(columns={
-            id_col: f"{dim_name[:-1]}_id",
-            name_col: f"{dim_name[:-1]}_name"
-        })
-    )
+    url = f"{BASE_URL}/{entity_set}"
+    rows = []
 
-    return clean_columns(dim_df)
+    while url:
+        r = requests.get(url, headers=headers)
+        r.raise_for_status()
+        data = r.json()
 
-# ----------------------
-# Upload to GCS (FULL LOAD, overwrite)
-# ----------------------
-def upload_to_gcs(df, folder):
-    if df.empty:
-        print(f"⚠️ Skip {folder} (empty)")
+        rows.extend(data.get("value", []))
+        url = data.get("@odata.nextLink")
+
+    if not rows:
+        print(f"⚠️ No data: {entity_name}")
         return
 
-    path = f"{folder}/{YEAR}/{MONTH}/{DAY}/{folder}.ndjson"
+    df = pd.DataFrame(rows)
 
-    client = storage.Client()  # ADC เหมือน main.py
-    bucket = client.bucket(GCS_BUCKET_NAME)
-    blob = bucket.blob(path)
+    today = datetime.now().strftime("%Y/%m/%d")
 
-    temp_file = "temp.ndjson"
-    df.to_json(
-        temp_file,
-        orient="records",
-        lines=True,
-        force_ascii=False
-    )
+    # ใช้ temp folder ของระบบ
+    local_path = os.path.join(tempfile.gettempdir(), f"{entity_name}.ndjson")
 
-    blob.upload_from_filename(temp_file)
-    os.remove(temp_file)
+    with open(local_path, "w", encoding="utf-8") as f:
+        for _, row in df.iterrows():
+            f.write(json.dumps(row.to_dict(), ensure_ascii=False) + "\n")
 
-    print(f"✅ Uploaded → gs://{GCS_BUCKET_NAME}/{path}")
+    client = storage.Client()
+    bucket = client.bucket(GCS_BUCKET)
+    
+    # 🔥 แก้ path ตาม request: root folder = entity_name
+    blob_path = f"{entity_name}/{today}/{entity_name}.ndjson"
+    blob = bucket.blob(blob_path)
+    blob.upload_from_filename(local_path)
 
-# ----------------------
+    print(f"✅ Uploaded {entity_name} ({len(df)} rows) to {blob_path}")
+
+# =============================
 # MAIN
-# ----------------------
+# =============================
 if __name__ == "__main__":
-    print("🚀 Start FULL LOAD DIM")
+    print("🚀 START FULL LOAD DIM")
 
-    df_source = load_source()
+    token = get_token()
 
-    for dim_name, cfg in DIM_CONFIG.items():
-        df_dim = build_dim(df_source, dim_name, cfg)
-        upload_to_gcs(df_dim, dim_name)
+    for name, entity in ENTITIES.items():
+        full_load(name, entity, token)
 
-    print("🎉 FULL LOAD DIM FINISHED")
+    print("🎉 DONE")
