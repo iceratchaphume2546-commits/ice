@@ -42,6 +42,33 @@ def get_token():
     return r.json()["access_token"]
 
 # =============================
+# CLEAN FIELD NAMES
+# =============================
+def clean_dict(d):
+    """
+    Replace invalid characters in keys for BigQuery:
+    - remove '@'
+    - replace '.' with '_'
+    - recursively handle nested dicts
+    """
+    new_dict = {}
+    for k, v in d.items():
+        new_key = k.replace("@", "").replace(".", "_")
+        if isinstance(v, dict):
+            new_dict[new_key] = clean_dict(v)
+        elif isinstance(v, list):
+            new_list = []
+            for item in v:
+                if isinstance(item, dict):
+                    new_list.append(clean_dict(item))
+                else:
+                    new_list.append(item)
+            new_dict[new_key] = new_list
+        else:
+            new_dict[new_key] = v
+    return new_dict
+
+# =============================
 # FETCH + UPLOAD (FULL LOAD)
 # =============================
 def full_load(entity_name, entity_set, token):
@@ -76,7 +103,8 @@ def full_load(entity_name, entity_set, token):
 
     with open(local_path, "w", encoding="utf-8") as f:
         for _, row in df.iterrows():
-            f.write(json.dumps(row.to_dict(), ensure_ascii=False) + "\n")
+            clean_row = clean_dict(row.to_dict())   # ✅ ทำความสะอาด field names
+            f.write(json.dumps(clean_row, ensure_ascii=False) + "\n")
 
     client = storage.Client()
     bucket = client.bucket(GCS_BUCKET)
@@ -99,4 +127,3 @@ if __name__ == "__main__":
     for name, entity in ENTITIES.items():
         full_load(name, entity, token)
 
-    print("🎉 DONE")
