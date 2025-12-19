@@ -6,6 +6,7 @@ from datetime import datetime
 import pytz
 from google.cloud import storage
 import re
+import json
 
 # ----------------------
 # โหลด .env
@@ -23,7 +24,7 @@ CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 DATAVERSE_URL = os.getenv("DATAVERSE_URL")
 
 # -----------------------------
-# ฟังก์ชันเวลาแบบ Bangkok
+# เวลา Bangkok
 # -----------------------------
 def now_th(fmt=None):
     tz = pytz.timezone("Asia/Bangkok")
@@ -40,7 +41,7 @@ MONTH = now_th("%m")
 DAY = now_th("%d")
 
 # -----------------------------
-# ขอ access token จาก Azure AD
+# Access token
 # -----------------------------
 def get_access_token():
     url = f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token"
@@ -55,7 +56,7 @@ def get_access_token():
     return r.json()["access_token"]
 
 # -----------------------------
-# ดึงข้อมูลจาก Dataverse
+# Fetch Dataverse
 # -----------------------------
 def fetch_dataverse_data(token, api_name):
     time_now = now_th_iso()
@@ -80,7 +81,7 @@ def fetch_dataverse_data(token, api_name):
     return data
 
 # -----------------------------
-# ปรับชื่อคอลัมน์ให้ BigQuery-safe
+# Clean column names
 # -----------------------------
 def clean_columns_for_bq(df):
     df.columns = [re.sub(r"[^\w]", "_", c).lower() for c in df.columns]
@@ -91,22 +92,17 @@ def clean_columns_for_bq(df):
     return df
 
 # -----------------------------
-# 🔥 แก้ปัญหา BigQuery JSON error
+# 🔥 sanitize value ระดับ row (ตัวจริง)
 # -----------------------------
-def sanitize_for_bigquery(df):
-    # แปลง dict / list → string
-    for col in df.columns:
-        df[col] = df[col].apply(
-            lambda x: str(x) if isinstance(x, (dict, list)) else x
-        )
-
-    # NaN → None (BigQuery อ่านได้)
-    df = df.where(pd.notnull(df), None)
-
-    return df
+def sanitize_value(v):
+    if isinstance(v, (dict, list)):
+        return json.dumps(v, ensure_ascii=False)
+    if pd.isna(v):
+        return None
+    return v
 
 # -----------------------------
-# อัปโหลด DataFrame ขึ้น GCS
+# Upload NDJSON (เขียนทีละ row)
 # -----------------------------
 def upload_to_gcs(df, folder, filename):
     path = f"{folder}/{YEAR}/{MONTH}/{DAY}/{filename}"
@@ -116,12 +112,10 @@ def upload_to_gcs(df, folder, filename):
     blob = bucket.blob(path)
 
     temp_file = "temp.ndjson"
-    df.to_json(
-        temp_file,
-        orient="records",
-        lines=True,
-        force_ascii=False
-    )
+    with open(temp_file, "w", encoding="utf-8") as f:
+        for _, row in df.iterrows():
+            clean_row = {k: sanitize_value(v) for k, v in row.items()}
+            f.write(json.dumps(clean_row, ensure_ascii=False) + "\n")
 
     blob.upload_from_filename(temp_file)
     os.remove(temp_file)
@@ -142,7 +136,7 @@ if __name__ == "__main__":
     }
 
     for folder, api_name in entities.items():
-        print(f"\n📥 กำลังดึงข้อมูล {api_name}")
+        print(f"\n📥 ดึงข้อมูล {api_name}")
         data = fetch_dataverse_data(token, api_name)
 
         if not data:
@@ -151,9 +145,8 @@ if __name__ == "__main__":
 
         df = pd.DataFrame(data)
         df = clean_columns_for_bq(df)
-        df = sanitize_for_bigquery(df)   # 👈 จุดที่แก้ให้ line ไม่พัง
 
         filename = f"{folder.split('/')[-1]}.ndjson"
         upload_to_gcs(df, folder, filename)
 
-    print("🎉 รันเสร็จสมบูรณ์ – Job จบการทำงาน")
+    print("🎉 รันเสร็จสมบูรณ์")
