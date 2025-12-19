@@ -6,10 +6,9 @@ from datetime import datetime
 import pytz
 from google.cloud import storage
 import re
-import json
 
 # ----------------------
-# โหลด .env (local ใช้ / Cloud Run ไม่กระทบ)
+# โหลด .env
 # ----------------------
 load_dotenv()
 
@@ -92,31 +91,24 @@ def clean_columns_for_bq(df):
     return df
 
 # -----------------------------
-# clean record ให้ BigQuery อ่านได้
+# 🔥 แก้ปัญหา BigQuery JSON error
 # -----------------------------
-def clean_record_for_bq(record: dict):
-    cleaned = {}
-    for k, v in record.items():
-        if k is None or k == "":
-            continue
+def sanitize_for_bigquery(df):
+    # แปลง dict / list → string
+    for col in df.columns:
+        df[col] = df[col].apply(
+            lambda x: str(x) if isinstance(x, (dict, list)) else x
+        )
 
-        # แปลง nested object เป็น string
-        if isinstance(v, (dict, list)):
-            cleaned[k] = json.dumps(v, ensure_ascii=False)
-        else:
-            cleaned[k] = v
+    # NaN → None (BigQuery อ่านได้)
+    df = df.where(pd.notnull(df), None)
 
-    return cleaned
+    return df
 
 # -----------------------------
-# อัปโหลด DataFrame ขึ้น GCS (NDJSON แบบ safe)
+# อัปโหลด DataFrame ขึ้น GCS
 # -----------------------------
 def upload_to_gcs(df, folder, filename):
-    skip_files = ["product_lines.ndjson", "itsm_adses.ndjson"]
-    if filename.lower() in skip_files:
-        print(f"⏭ ข้ามการอัปโหลด {filename}")
-        return
-
     path = f"{folder}/{YEAR}/{MONTH}/{DAY}/{filename}"
 
     client = storage.Client()
@@ -124,23 +116,23 @@ def upload_to_gcs(df, folder, filename):
     blob = bucket.blob(path)
 
     temp_file = "temp.ndjson"
-
-    # เขียน NDJSON ทีละ row (BigQuery-safe)
-    with open(temp_file, "w", encoding="utf-8") as f:
-        for _, row in df.iterrows():
-            record = clean_record_for_bq(row.to_dict())
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    df.to_json(
+        temp_file,
+        orient="records",
+        lines=True,
+        force_ascii=False
+    )
 
     blob.upload_from_filename(temp_file)
     os.remove(temp_file)
 
-    print(f" อัปโหลดสำเร็จ → gs://{GCS_BUCKET_NAME}/{path}")
+    print(f"✅ อัปโหลดสำเร็จ → gs://{GCS_BUCKET_NAME}/{path}")
 
 # -----------------------------
-# MAIN (Cloud Run Job)
+# MAIN
 # -----------------------------
 if __name__ == "__main__":
-    print(" เริ่มรัน Dataverse → GCS")
+    print("🚀 เริ่มรัน Dataverse → GCS")
 
     token = get_access_token()
 
@@ -150,15 +142,16 @@ if __name__ == "__main__":
     }
 
     for folder, api_name in entities.items():
-        print(f"\n กำลังดึงข้อมูล {api_name}")
+        print(f"\n📥 กำลังดึงข้อมูล {api_name}")
         data = fetch_dataverse_data(token, api_name)
 
         if not data:
-            print(" ไม่มีข้อมูล")
+            print("⚠️ ไม่มีข้อมูล")
             continue
 
         df = pd.DataFrame(data)
         df = clean_columns_for_bq(df)
+        df = sanitize_for_bigquery(df)   # 👈 จุดที่แก้ให้ line ไม่พัง
 
         filename = f"{folder.split('/')[-1]}.ndjson"
         upload_to_gcs(df, folder, filename)
