@@ -6,6 +6,7 @@ from datetime import datetime
 import pytz
 from google.cloud import storage
 import re
+import json
 
 # ----------------------
 # โหลด .env (local ใช้ / Cloud Run ไม่กระทบ)
@@ -86,11 +87,29 @@ def clean_columns_for_bq(df):
     df.columns = [re.sub(r"[^\w]", "_", c).lower() for c in df.columns]
     df.columns = [
         c if c[0].isalpha() or c[0] == "_" else f"col_{i}"
-        for i, c in enumerate(df.columns)]
+        for i, c in enumerate(df.columns)
+    ]
     return df
 
 # -----------------------------
-# อัปโหลด DataFrame ขึ้น GCS
+# clean record ให้ BigQuery อ่านได้
+# -----------------------------
+def clean_record_for_bq(record: dict):
+    cleaned = {}
+    for k, v in record.items():
+        if k is None or k == "":
+            continue
+
+        # แปลง nested object เป็น string
+        if isinstance(v, (dict, list)):
+            cleaned[k] = json.dumps(v, ensure_ascii=False)
+        else:
+            cleaned[k] = v
+
+    return cleaned
+
+# -----------------------------
+# อัปโหลด DataFrame ขึ้น GCS (NDJSON แบบ safe)
 # -----------------------------
 def upload_to_gcs(df, folder, filename):
     skip_files = ["product_lines.ndjson", "itsm_adses.ndjson"]
@@ -100,21 +119,25 @@ def upload_to_gcs(df, folder, filename):
 
     path = f"{folder}/{YEAR}/{MONTH}/{DAY}/{filename}"
 
-    # ใช้ Application Default Credentials (Cloud Run)
     client = storage.Client()
     bucket = client.bucket(GCS_BUCKET_NAME)
     blob = bucket.blob(path)
 
     temp_file = "temp.ndjson"
-    df.to_json(temp_file, orient="records", lines=True, force_ascii=False)
-    blob.upload_from_filename(temp_file)
 
+    # เขียน NDJSON ทีละ row (BigQuery-safe)
+    with open(temp_file, "w", encoding="utf-8") as f:
+        for _, row in df.iterrows():
+            record = clean_record_for_bq(row.to_dict())
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    blob.upload_from_filename(temp_file)
     os.remove(temp_file)
 
     print(f" อัปโหลดสำเร็จ → gs://{GCS_BUCKET_NAME}/{path}")
 
 # -----------------------------
-# MAIN (Cloud Run Job ต้องจบตรงนี้)
+# MAIN (Cloud Run Job)
 # -----------------------------
 if __name__ == "__main__":
     print(" เริ่มรัน Dataverse → GCS")
