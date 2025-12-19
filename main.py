@@ -92,7 +92,7 @@ def clean_columns_for_bq(df):
     return df
 
 # -----------------------------
-# 🔥 sanitize value ระดับ row (ตัวจริง)
+# 🔥 sanitize value ระดับ row
 # -----------------------------
 def sanitize_value(v):
     if isinstance(v, (dict, list)):
@@ -100,6 +100,28 @@ def sanitize_value(v):
     if pd.isna(v):
         return None
     return v
+
+# -----------------------------
+# 🔥 sanitize สำหรับ DataFrame ก่อนส่ง BQ
+# -----------------------------
+def sanitize_for_bigquery(df):
+    for col in df.columns:
+        df[col] = df[col].apply(sanitize_value)
+    return df
+
+# -----------------------------
+# 🔥 ลบ control characters ที่ BigQuery ห้าม
+# -----------------------------
+def remove_control_chars(df):
+    def clean(x):
+        if isinstance(x, str):
+            return re.sub(r"[\x00-\x1F\x7F]", "", x)
+        return x
+
+    for col in df.columns:
+        df[col] = df[col].apply(clean)
+
+    return df
 
 # -----------------------------
 # Upload NDJSON (เขียนทีละ row)
@@ -145,6 +167,10 @@ if __name__ == "__main__":
 
         df = pd.DataFrame(data)
         df = clean_columns_for_bq(df)
+        
+        # 🔥 sanitize + ลบ control chars
+        df = sanitize_for_bigquery(df)
+        df = remove_control_chars(df)
 
         filename = f"{folder.split('/')[-1]}.ndjson"
         upload_to_gcs(df, folder, filename)
