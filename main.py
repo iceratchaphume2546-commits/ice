@@ -1,187 +1,155 @@
 import os
-import pandas as pd
-import requests
-from dotenv import load_dotenv
-from datetime import datetime, timedelta
-import pytz
-from google.cloud import storage, bigquery
 import re
 import json
+import requests
+import pandas as pd
+from datetime import datetime, timedelta
+from dotenv import load_dotenv
+from google.cloud import storage, bigquery
 
-# ----------------------
+# ==============================
 # LOAD ENV
-# ----------------------
+# ==============================
 load_dotenv()
-
-# ----------------------
-# ENV
-# ----------------------
 GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME", "hongthai")
-TENANT_ID = os.getenv("TENANT_ID")
+BQ_PROJECT = os.getenv("BQ_PROJECT", "itsm-pipeline")
+DATAVERSE_URL = os.getenv("DATAVERSE_URL")
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
-DATAVERSE_URL = os.getenv("DATAVERSE_URL")
+TENANT_ID = os.getenv("TENANT_ID")
+SCOPE = os.getenv("SCOPE")
 
-BQ_PROJECT = os.getenv("BQ_PROJECT", "itsm-pipeline")
-STAGE_HEADER = "stage.stage_header"
-STAGE_LINE = "stage.stage_line"
+# ==============================
+# ENTITIES
+# ==============================
+ENTITIES = {
+    "header": {
+        "dataverse_entity": "itsm_adses",
+        "gcs_folder": "ads/header",
+        "stage_table": "stage.stage_headerheader",
+        "filename": "header.ndjson",
+        "key": "itsm_adsesid",
+    },
+    "line": {
+        "dataverse_entity": "itsm_ads_product_lines",
+        "gcs_folder": "ads/line",
+        "stage_table": "stage.stage_headerline",
+        "filename": "line.ndjson",
+        "key": "itsm_ads_product_linesid",
+    }
+}
 
-# -----------------------------
+# ==============================
 # TIME
-# -----------------------------
-tz = pytz.timezone("Asia/Bangkok")
-yesterday = (datetime.now(tz) - timedelta(days=1)).date()
+# ==============================
+def today_date():
+    return datetime.now().date()
 
-# -----------------------------
-# ACCESS TOKEN
-# -----------------------------
-def get_access_token():
+def yesterday_date():
+    return today_date() - timedelta(days=1)
+
+# ==============================
+# GET DATAVERSE TOKEN
+# ==============================
+def get_token():
     url = f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token"
-    payload = {
+    data = {
         "client_id": CLIENT_ID,
         "client_secret": CLIENT_SECRET,
+        "scope": SCOPE,
         "grant_type": "client_credentials",
-        "scope": f"{DATAVERSE_URL}/.default"
     }
-    r = requests.post(url, data=payload)
+    r = requests.post(url, data=data)
     r.raise_for_status()
     return r.json()["access_token"]
 
-# -----------------------------
-# FETCH DATAVERSE (NO FILTER)
-# -----------------------------
-def fetch_dataverse_data(token, api_name):
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/json"
-    }
+# ==============================
+# CLEAN DICT
+# ==============================
+def clean_dict(d):
+    new_dict = {}
+    for k, v in d.items():
+        new_key = k.replace("@", "").replace(".", "_")
+        if isinstance(v, dict):
+            new_dict[new_key] = clean_dict(v)
+        elif isinstance(v, list):
+            new_list = [clean_dict(i) if isinstance(i, dict) else i for i in v]
+            new_dict[new_key] = new_list
+        else:
+            new_dict[new_key] = v
+    return new_dict
 
-    url = f"{DATAVERSE_URL}/api/data/v9.2/{api_name}"
-    data = []
-
+# ==============================
+# FETCH DATAVERSE
+# ==============================
+def fetch_dataverse(entity_name, token):
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    url = f"{DATAVERSE_URL}/api/data/v9.2/{entity_name}"
+    rows = []
     while url:
         r = requests.get(url, headers=headers)
         r.raise_for_status()
-        js = r.json()
-        data.extend(js.get("value", []))
-        url = js.get("@odata.nextLink")
+        data = r.json()
+        rows.extend(data.get("value", []))
+        url = data.get("@odata.nextLink")
+    df = pd.DataFrame(rows)
+    return df
 
-    return data
-
-# -----------------------------
-# CLEAN COLUMNS
-# -----------------------------
-def clean_columns_for_bq(df):
+# ==============================
+# CLEAN & SANITIZE FOR BQ
+# ==============================
+def sanitize_for_bigquery(df):
+    for col in df.columns:
+        df[col] = df[col].map(lambda x: x if not isinstance(x, (dict, list)) else json.dumps(x, ensure_ascii=False))
+        df[col] = df[col].map(lambda x: re.sub(r"[\x00-\x1F\x7F]", "", x) if isinstance(x, str) else x)
     df.columns = [re.sub(r"[^\w]", "_", c).lower() for c in df.columns]
+    df.columns = [c if c[0].isalpha() or c[0] == "_" else f"col_{i}" for i, c in enumerate(df.columns)]
     return df
 
-# -----------------------------
-# SANITIZE
-# -----------------------------
-def sanitize_value(v):
-    if isinstance(v, (dict, list)):
-        return json.dumps(v, ensure_ascii=False)
-    if pd.isna(v):
-        return None
-    return v
-
-def sanitize_df(df):
-    for c in df.columns:
-        df[c] = df[c].apply(sanitize_value)
-    return df
-
-def remove_control_chars(df):
-    def clean(x):
-        if isinstance(x, str):
-            return re.sub(r"[\x00-\x1F\x7F]", "", x)
-        return x
-
-    for c in df.columns:
-        df[c] = df[c].apply(clean)
-    return df
-
-# -----------------------------
-# UPLOAD TO GCS (UNCHANGED)
-# -----------------------------
-def upload_to_gcs(df, folder, filename):
-    path = f"{folder}/{filename}"
+# ==============================
+# UPLOAD GCS
+# ==============================
+def upload_ndjson_to_gcs(df, gcs_folder, filename):
     client = storage.Client()
     bucket = client.bucket(GCS_BUCKET_NAME)
-    blob = bucket.blob(path)
+    today = today_date()
+    blob_path = f"{gcs_folder}/{today.year}/{today.month:02}/{today.day:02}/{filename}"
+    blob = bucket.blob(blob_path)
+    blob.upload_from_string(df.to_json(orient="records", lines=True, force_ascii=False), content_type="application/json")
+    print(f"📦 Uploaded to GCS: gs://{GCS_BUCKET_NAME}/{blob_path}")
 
-    temp_file = "temp.ndjson"
-    with open(temp_file, "w", encoding="utf-8") as f:
-        for _, row in df.iterrows():
-            f.write(json.dumps(row.to_dict(), ensure_ascii=False) + "\n")
-
-    blob.upload_from_filename(temp_file)
-    os.remove(temp_file)
-
-    print(f"✅ upload → gs://{GCS_BUCKET_NAME}/{path}")
-
-# -----------------------------
-# PUSH TO STAGE (APPEND ONLY)
-# -----------------------------
+# ==============================
+# PUSH TO BIGQUERY STAGE
+# ==============================
 def push_to_stage(df, stage_table):
-    if df.empty:
-        print("⚠️ ไม่มีข้อมูล → ข้าม stage")
-        return
-
     client = bigquery.Client(project=BQ_PROJECT)
-    table_id = f"{BQ_PROJECT}.{stage_table}"
-
-    job_config = bigquery.LoadJobConfig(
-        write_disposition="WRITE_APPEND"
-    )
-
-    job = client.load_table_from_dataframe(
-        df,
-        table_id,
-        job_config=job_config
-    )
+    job = client.load_table_from_dataframe(df, stage_table, job_config=bigquery.LoadJobConfig(write_disposition="WRITE_TRUNCATE"))
     job.result()
+    print(f"⬆️ Pushed to Stage {stage_table}: {len(df)} rows")
 
-    print(f"✅ append {len(df)} rows → {stage_table}")
+# ==============================
+# PROCESS ENTITY
+# ==============================
+def process_entity(name, config, token):
+    print(f"\n🚀 PROCESS {name.upper()}")
+    df = fetch_dataverse(config["dataverse_entity"], token)
+    if df.empty:
+        print(f"⚠️ No data for {name}")
+        return
+    # Clean data
+    df = df.applymap(lambda x: clean_dict(x) if isinstance(x, dict) else x)
+    df = sanitize_for_bigquery(df)
+    # Upload
+    upload_ndjson_to_gcs(df, config["gcs_folder"], config["filename"])
+    push_to_stage(df, config["stage_table"])
+    print(f"✅ {name} DONE")
 
-# -----------------------------
+# ==============================
 # MAIN
-# -----------------------------
+# ==============================
 if __name__ == "__main__":
-    print(f"🚀 Dataverse → GCS → Stage (yesterday {yesterday})")
-
-    token = get_access_token()
-
-    entities = {
-        "ads/header": "itsm_adses",
-        "ads/line": "itsm_ads_product_lines"
-    }
-
-    for folder, api_name in entities.items():
-        print(f"\n📥 ดึงข้อมูล {api_name}")
-        data = fetch_dataverse_data(token, api_name)
-
-        if not data:
-            print("⚠️ ไม่มีข้อมูลจาก API")
-            continue
-
-        df = pd.DataFrame(data)
-        df = clean_columns_for_bq(df)
-
-        # 👉 filter yesterday ที่นี่ (optional)
-        df["modifiedon"] = pd.to_datetime(df["modifiedon"], errors="coerce")
-        df = df[df["modifiedon"].dt.date == yesterday]
-
-        if df.empty:
-            print("⚠️ ไม่มีข้อมูลของเมื่อวาน")
-            continue
-
-        df = sanitize_df(df)
-        df = remove_control_chars(df)
-
-        filename = f"{folder.split('/')[-1]}.ndjson"
-        upload_to_gcs(df, folder, filename)
-
-        stage_table = STAGE_HEADER if "header" in folder else STAGE_LINE
-        push_to_stage(df, stage_table)
-
-    print("\n🎉 DONE")
+    print(f"⏰ RUN DATE: {today_date()}")
+    token = get_token()
+    for name, cfg in ENTITIES.items():
+        process_entity(name, cfg, token)
+    print("\n🎉 JOB SUCCESS (Dataverse → GCS → Stage)")

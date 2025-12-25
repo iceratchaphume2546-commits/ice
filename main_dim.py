@@ -15,7 +15,7 @@ if os.path.exists(".env"):
 # =============================
 # CONFIG
 # =============================
-BASE_URL = "https://itsmdev.crm5.dynamics.com/api/data/v9.2"
+BASE_URL = "https://itsm.crm5.dynamics.com/api/data/v9.2"
 GCS_BUCKET = os.getenv("GCS_BUCKET_NAME")
 
 ENTITIES = {
@@ -33,7 +33,7 @@ def get_token():
     data = {
         "client_id": os.getenv("CLIENT_ID"),
         "client_secret": os.getenv("CLIENT_SECRET"),
-        "scope": "https://itsmdev.crm5.dynamics.com/.default",
+        "scope": "https://itsm.crm5.dynamics.com/.default",
         "grant_type": "client_credentials",
     }
     r = requests.post(url, data=data)
