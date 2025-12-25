@@ -2,46 +2,38 @@ import os
 import pandas as pd
 import requests
 from dotenv import load_dotenv
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
-from google.cloud import storage
+from google.cloud import storage, bigquery
 import re
 import json
 
 # ----------------------
-# โหลด .env
+# LOAD ENV
 # ----------------------
 load_dotenv()
 
 # ----------------------
-# Environment variables
+# ENV
 # ----------------------
 GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME", "hongthai")
-
 TENANT_ID = os.getenv("TENANT_ID")
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 DATAVERSE_URL = os.getenv("DATAVERSE_URL")
 
-# -----------------------------
-# เวลา Bangkok
-# -----------------------------
-def now_th(fmt=None):
-    tz = pytz.timezone("Asia/Bangkok")
-    now = datetime.utcnow().replace(tzinfo=pytz.utc).astimezone(tz)
-    return now.strftime(fmt) if fmt else now
-
-def now_th_iso():
-    tz = pytz.timezone("Asia/Bangkok")
-    now = datetime.now(tz)
-    return now.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-YEAR = now_th("%Y")
-MONTH = now_th("%m")
-DAY = now_th("%d")
+BQ_PROJECT = os.getenv("BQ_PROJECT", "itsm-pipeline")
+STAGE_HEADER = "stage.stage_header"
+STAGE_LINE = "stage.stage_line"
 
 # -----------------------------
-# Access token
+# TIME
+# -----------------------------
+tz = pytz.timezone("Asia/Bangkok")
+yesterday = (datetime.now(tz) - timedelta(days=1)).date()
+
+# -----------------------------
+# ACCESS TOKEN
 # -----------------------------
 def get_access_token():
     url = f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token"
@@ -56,21 +48,17 @@ def get_access_token():
     return r.json()["access_token"]
 
 # -----------------------------
-# Fetch Dataverse
+# FETCH DATAVERSE (NO FILTER)
 # -----------------------------
 def fetch_dataverse_data(token, api_name):
-    time_now = now_th_iso()
-    url = (
-        f"{DATAVERSE_URL}/api/data/v9.2/{api_name}"
-        f"?$filter=modifiedon lt '{time_now}'"
-    )
-
     headers = {
         "Authorization": f"Bearer {token}",
         "Accept": "application/json"
     }
 
+    url = f"{DATAVERSE_URL}/api/data/v9.2/{api_name}"
     data = []
+
     while url:
         r = requests.get(url, headers=headers)
         r.raise_for_status()
@@ -81,18 +69,14 @@ def fetch_dataverse_data(token, api_name):
     return data
 
 # -----------------------------
-# Clean column names
+# CLEAN COLUMNS
 # -----------------------------
 def clean_columns_for_bq(df):
     df.columns = [re.sub(r"[^\w]", "_", c).lower() for c in df.columns]
-    df.columns = [
-        c if c[0].isalpha() or c[0] == "_" else f"col_{i}"
-        for i, c in enumerate(df.columns)
-    ]
     return df
 
 # -----------------------------
-# 🔥 sanitize value ระดับ row
+# SANITIZE
 # -----------------------------
 def sanitize_value(v):
     if isinstance(v, (dict, list)):
@@ -101,34 +85,26 @@ def sanitize_value(v):
         return None
     return v
 
-# -----------------------------
-# 🔥 sanitize สำหรับ DataFrame ก่อนส่ง BQ
-# -----------------------------
-def sanitize_for_bigquery(df):
-    for col in df.columns:
-        df[col] = df[col].apply(sanitize_value)
+def sanitize_df(df):
+    for c in df.columns:
+        df[c] = df[c].apply(sanitize_value)
     return df
 
-# -----------------------------
-# 🔥 ลบ control characters ที่ BigQuery ห้าม
-# -----------------------------
 def remove_control_chars(df):
     def clean(x):
         if isinstance(x, str):
             return re.sub(r"[\x00-\x1F\x7F]", "", x)
         return x
 
-    for col in df.columns:
-        df[col] = df[col].apply(clean)
-
+    for c in df.columns:
+        df[c] = df[c].apply(clean)
     return df
 
 # -----------------------------
-# Upload NDJSON (เขียนทีละ row)
+# UPLOAD TO GCS (UNCHANGED)
 # -----------------------------
 def upload_to_gcs(df, folder, filename):
-    path = f"{folder}/{YEAR}/{MONTH}/{DAY}/{filename}"
-
+    path = f"{folder}/{filename}"
     client = storage.Client()
     bucket = client.bucket(GCS_BUCKET_NAME)
     blob = bucket.blob(path)
@@ -136,19 +112,42 @@ def upload_to_gcs(df, folder, filename):
     temp_file = "temp.ndjson"
     with open(temp_file, "w", encoding="utf-8") as f:
         for _, row in df.iterrows():
-            clean_row = {k: sanitize_value(v) for k, v in row.items()}
-            f.write(json.dumps(clean_row, ensure_ascii=False) + "\n")
+            f.write(json.dumps(row.to_dict(), ensure_ascii=False) + "\n")
 
     blob.upload_from_filename(temp_file)
     os.remove(temp_file)
 
-    print(f"✅ อัปโหลดสำเร็จ → gs://{GCS_BUCKET_NAME}/{path}")
+    print(f"✅ upload → gs://{GCS_BUCKET_NAME}/{path}")
+
+# -----------------------------
+# PUSH TO STAGE (APPEND ONLY)
+# -----------------------------
+def push_to_stage(df, stage_table):
+    if df.empty:
+        print("⚠️ ไม่มีข้อมูล → ข้าม stage")
+        return
+
+    client = bigquery.Client(project=BQ_PROJECT)
+    table_id = f"{BQ_PROJECT}.{stage_table}"
+
+    job_config = bigquery.LoadJobConfig(
+        write_disposition="WRITE_APPEND"
+    )
+
+    job = client.load_table_from_dataframe(
+        df,
+        table_id,
+        job_config=job_config
+    )
+    job.result()
+
+    print(f"✅ append {len(df)} rows → {stage_table}")
 
 # -----------------------------
 # MAIN
 # -----------------------------
 if __name__ == "__main__":
-    print("🚀 เริ่มรัน Dataverse → GCS")
+    print(f"🚀 Dataverse → GCS → Stage (yesterday {yesterday})")
 
     token = get_access_token()
 
@@ -162,17 +161,27 @@ if __name__ == "__main__":
         data = fetch_dataverse_data(token, api_name)
 
         if not data:
-            print("⚠️ ไม่มีข้อมูล")
+            print("⚠️ ไม่มีข้อมูลจาก API")
             continue
 
         df = pd.DataFrame(data)
         df = clean_columns_for_bq(df)
-        
-        # 🔥 sanitize + ลบ control chars
-        df = sanitize_for_bigquery(df)
+
+        # 👉 filter yesterday ที่นี่ (optional)
+        df["modifiedon"] = pd.to_datetime(df["modifiedon"], errors="coerce")
+        df = df[df["modifiedon"].dt.date == yesterday]
+
+        if df.empty:
+            print("⚠️ ไม่มีข้อมูลของเมื่อวาน")
+            continue
+
+        df = sanitize_df(df)
         df = remove_control_chars(df)
 
         filename = f"{folder.split('/')[-1]}.ndjson"
         upload_to_gcs(df, folder, filename)
 
-    print("🎉 รันเสร็จสมบูรณ์")
+        stage_table = STAGE_HEADER if "header" in folder else STAGE_LINE
+        push_to_stage(df, stage_table)
+
+    print("\n🎉 DONE")
