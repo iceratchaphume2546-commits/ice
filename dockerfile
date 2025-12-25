@@ -1,5 +1,5 @@
 # ใช้ image python
-FROM python:3.11-slim
+FROM python:3.14
  
 WORKDIR /app
  
