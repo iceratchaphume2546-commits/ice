@@ -20,3 +20,5 @@ google-cloud-storage
 requests
 flask
 pytz
+google-cloud-storage
+google-cloud-bigquery
