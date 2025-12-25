@@ -17,7 +17,6 @@ CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 TENANT_ID = os.getenv("TENANT_ID")
 DATAVERSE_URL = os.getenv("DATAVERSE_URL")
-SCOPE = os.getenv("SCOPE")
 GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME")
 BQ_PROJECT = os.getenv("BQ_PROJECT", "itsm-pipeline")
 
@@ -33,6 +32,21 @@ def today_date():
 
 def yesterday_date():
     return today_date() - timedelta(days=1)
+
+# ==============================
+# GET DATAVERSE TOKEN (NEW VERSION)
+# ==============================
+def get_token():
+    url = f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token"
+    data = {
+        "client_id": CLIENT_ID,
+        "client_secret": CLIENT_SECRET,
+        "scope": f"{DATAVERSE_URL}/.default",
+        "grant_type": "client_credentials",
+    }
+    r = requests.post(url, data=data)
+    r.raise_for_status()
+    return r.json()["access_token"]
 
 # ==============================
 # CLEAN & SANITIZE
@@ -80,18 +94,6 @@ def remove_control_chars(df):
 # ==============================
 # DATAVERSE FUNCTIONS
 # ==============================
-def get_token():
-    url = f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token"
-    data = {
-        "client_id": CLIENT_ID,
-        "client_secret": CLIENT_SECRET,
-        "scope": SCOPE,
-        "grant_type": "client_credentials"
-    }
-    r = requests.post(url, data=data)
-    r.raise_for_status()
-    return r.json()["access_token"]
-
 def fetch_dataverse(entity_set, token):
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
     url = f"{DATAVERSE_URL}/api/data/v9.2/{entity_set}"
@@ -132,7 +134,11 @@ def push_to_stage(df, stage_table):
     df = clean_columns_for_bq(df)
     df = sanitize_for_bigquery(df)
     df = remove_control_chars(df)
-    job = client.load_table_from_dataframe(df, f"{BQ_PROJECT}.{stage_table}", job_config=bigquery.LoadJobConfig(write_disposition="WRITE_TRUNCATE"))
+    job = client.load_table_from_dataframe(
+        df,
+        f"{BQ_PROJECT}.{stage_table}",
+        job_config=bigquery.LoadJobConfig(write_disposition="WRITE_TRUNCATE")
+    )
     job.result()
     print(f"⬆️ Pushed to Stage {stage_table}: {len(df)} rows")
 
