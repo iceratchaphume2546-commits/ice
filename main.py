@@ -123,7 +123,7 @@ def upload_to_gcs(df, folder_path, file_name):
     print(f"📦 Uploaded NDJSON → gs://{GCS_BUCKET}/{gcs_path}")
     return gcs_path
 
-# ================================
+# ==================================
 # Main
 # ================================
 if __name__ == "__main__":
