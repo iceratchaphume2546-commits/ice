@@ -82,8 +82,14 @@ def fetch_dataverse(entity_name, token):
 # ================================
 def clean_df(df):
     df = df.copy()
+
+    # ลบ column แปลก เช่น @odata.etag
     invalid_cols = [c for c in df.columns if not c.replace("_", "").isalnum()]
     df.drop(columns=invalid_cols, inplace=True, errors="ignore")
+
+    # 🔴 สำคัญมาก: ลบ row ว่างทั้งแถว (ต้นเหตุ {})
+    df.dropna(how="all", inplace=True)
+
     return df
 
 # ================================
@@ -93,6 +99,10 @@ def upload_to_gcs(df, folder_path, file_name):
     if df.empty:
         print(f"⚠️ No data to upload for {file_name}")
         return None
+
+    # 🔍 log ตัวอย่างข้อมูล (debug)
+    print("🔎 Sample data:")
+    print(df.head(2).to_dict(orient="records"))
 
     client = storage.Client()
     bucket = client.bucket(GCS_BUCKET)
