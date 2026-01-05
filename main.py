@@ -99,6 +99,21 @@ def clean_df(df):
     return df
 
 # ================================
+# Delete old files in GCS folder
+# ================================
+def clean_gcs_folder(folder_path):
+    client = storage.Client()
+    bucket = client.bucket(GCS_BUCKET)
+    blobs = bucket.list_blobs(prefix=folder_path)
+
+    deleted_count = 0
+    for blob in blobs:
+        blob.delete()
+        deleted_count += 1
+
+    print(f"🗑 Deleted {deleted_count} old files in gs://{GCS_BUCKET}/{folder_path}/")
+
+# ================================
 # Upload NDJSON to GCS (Thai date)
 # ================================
 def upload_to_gcs(df, folder_path, file_name):
@@ -111,6 +126,9 @@ def upload_to_gcs(df, folder_path, file_name):
     # 🔍 log ตัวอย่างข้อมูล
     print("🔎 Sample data:")
     print(df.head(2).to_dict(orient="records"))
+
+    # ลบไฟล์เก่าใน folder
+    clean_gcs_folder(folder_path)
 
     client = storage.Client()
     bucket = client.bucket(GCS_BUCKET)
