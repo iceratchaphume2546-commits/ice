@@ -83,11 +83,17 @@ def fetch_dataverse(entity_name, token):
 def clean_df(df):
     df = df.copy()
 
-    # ลบ column แปลก เช่น @odata.etag
-    invalid_cols = [c for c in df.columns if not c.replace("_", "").isalnum()]
-    df.drop(columns=invalid_cols, inplace=True, errors="ignore")
+    # แปลงชื่อ columns ให้ BigQuery-safe: @, ., - -> _
+    new_cols = {}
+    for c in df.columns:
+        new_c = c.replace("@", "_").replace(".", "_").replace("-", "_")
+        new_cols[c] = new_c
+    df.rename(columns=new_cols, inplace=True)
 
-    # 🔴 สำคัญมาก: ลบ row ว่างทั้งแถว (ต้นเหตุ {})
+    # ลบ column ที่เป็น None หรือชื่อว่าง
+    df = df[[c for c in df.columns if c]]
+
+    # ลบ row ว่างทั้งหมด
     df.dropna(how="all", inplace=True)
 
     return df
@@ -100,7 +106,9 @@ def upload_to_gcs(df, folder_path, file_name):
         print(f"⚠️ No data to upload for {file_name}")
         return None
 
-    # 🔍 log ตัวอย่างข้อมูล (debug)
+    df = clean_df(df)  # 🔴 ทำความสะอาดก่อน upload
+
+    # 🔍 log ตัวอย่างข้อมูล
     print("🔎 Sample data:")
     print(df.head(2).to_dict(orient="records"))
 
