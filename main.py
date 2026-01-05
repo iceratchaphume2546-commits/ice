@@ -82,53 +82,25 @@ def fetch_dataverse(entity_name, token):
 # ================================
 def clean_df(df):
     df = df.copy()
-
     # แปลงชื่อ columns ให้ BigQuery-safe: @, ., - -> _
-    new_cols = {}
-    for c in df.columns:
-        new_c = c.replace("@", "_").replace(".", "_").replace("-", "_")
-        new_cols[c] = new_c
-    df.rename(columns=new_cols, inplace=True)
-
-    # ลบ column ที่เป็น None หรือชื่อว่าง
-    df = df[[c for c in df.columns if c]]
-
+    df.columns = [c.replace("@", "_").replace(".", "_").replace("-", "_") for c in df.columns]
     # ลบ row ว่างทั้งหมด
     df.dropna(how="all", inplace=True)
-
     return df
 
 # ================================
-# Delete old files in GCS folder
-# ================================
-def clean_gcs_folder(folder_path):
-    client = storage.Client()
-    bucket = client.bucket(GCS_BUCKET)
-    blobs = bucket.list_blobs(prefix=folder_path)
-
-    deleted_count = 0
-    for blob in blobs:
-        blob.delete()
-        deleted_count += 1
-
-    print(f"🗑 Deleted {deleted_count} old files in gs://{GCS_BUCKET}/{folder_path}/")
-
-# ================================
-# Upload NDJSON to GCS (Thai date)
+# Upload NDJSON to GCS
 # ================================
 def upload_to_gcs(df, folder_path, file_name):
     if df.empty:
         print(f"⚠️ No data to upload for {file_name}")
         return None
 
-    df = clean_df(df)  # 🔴 ทำความสะอาดก่อน upload
+    df = clean_df(df)
 
     # 🔍 log ตัวอย่างข้อมูล
     print("🔎 Sample data:")
     print(df.head(2).to_dict(orient="records"))
-
-    # ลบไฟล์เก่าใน folder
-    clean_gcs_folder(folder_path)
 
     client = storage.Client()
     bucket = client.bucket(GCS_BUCKET)
