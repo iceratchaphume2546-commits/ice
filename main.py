@@ -68,21 +68,25 @@ def fetch_dataverse(entity_name, token):
     }
 
     url = f"{DATAVERSE_URL}/api/data/v9.2/{entity_name}"
+
     all_rows = []
+    page = 1
 
     while url:
         r = requests.get(url, headers=headers)
         r.raise_for_status()
 
-        json_data = r.json()
-        rows = json_data.get("value", [])
+        result = r.json()
+        rows = result.get("value", [])
         all_rows.extend(rows)
 
-        # 👉 สำคัญ: ดึงหน้าถัดไป
-        url = json_data.get("@odata.nextLink")
+        print(f"📄 {entity_name} page {page} rows: {len(rows)}")
+
+        url = result.get("@odata.nextLink")
+        page += 1
 
     df = pd.DataFrame(all_rows)
-    print(f"📊 {entity_name} rows fetched: {len(df)}")
+    print(f"📊 {entity_name} TOTAL rows fetched: {len(df)}")
     return df
 
 # ================================
@@ -90,14 +94,10 @@ def fetch_dataverse(entity_name, token):
 # ================================
 def clean_df(df):
     df = df.copy()
-    # แปลงชื่อ columns ให้ BigQuery-safe
     df.columns = [
-        c.replace("@", "_")
-         .replace(".", "_")
-         .replace("-", "_")
+        c.replace("@", "_").replace(".", "_").replace("-", "_")
         for c in df.columns
     ]
-    # ลบ row ว่างทั้งหมด
     df.dropna(how="all", inplace=True)
     return df
 
@@ -111,7 +111,6 @@ def upload_to_gcs(df, folder_path, file_name):
 
     df = clean_df(df)
 
-    # 🔍 log ตัวอย่างข้อมูล
     print("🔎 Sample data:")
     print(df.head(2).to_dict(orient="records"))
 
@@ -134,11 +133,12 @@ def upload_to_gcs(df, folder_path, file_name):
     )
 
     print(f"📦 Uploaded NDJSON → gs://{GCS_BUCKET}/{gcs_path}")
+    print(f"📦 Row count written: {len(df)}")
     return gcs_path
 
 # ==================================
 # Main
-# ================================
+# ==================================
 if __name__ == "__main__":
     print("⏰ RUN PIPELINE (Asia/Bangkok)")
 
