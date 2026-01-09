@@ -134,7 +134,7 @@ def upload_to_gcs(df, folder_path, file_name):
 
 # ================================
 # Main
-# ================================
+# ==================================
 if __name__ == "__main__":
     print("⏰ RUN PIPELINE (Asia/Bangkok)")
 
