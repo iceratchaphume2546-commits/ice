@@ -30,12 +30,12 @@ GCS_BUCKET = os.getenv("GCS_BUCKET", "hongthai")
 # ================================
 ENTITIES = [
     {
-        "name": "itsm_adses",               # Header
+        "name": "itsm_adses",
         "gcs_folder": "ads/header",
         "file_name": "header.ndjson"
     },
     {
-        "name": "itsm_ads_product_lines",   # Line
+        "name": "itsm_ads_product_lines",
         "gcs_folder": "ads/line",
         "file_name": "line.ndjson"
     }
@@ -68,7 +68,6 @@ def fetch_dataverse(entity_name, token):
     }
 
     url = f"{DATAVERSE_URL}/api/data/v9.2/{entity_name}"
-
     all_rows = []
     page = 1
 
@@ -76,13 +75,13 @@ def fetch_dataverse(entity_name, token):
         r = requests.get(url, headers=headers)
         r.raise_for_status()
 
-        result = r.json()
-        rows = result.get("value", [])
+        res = r.json()
+        rows = res.get("value", [])
         all_rows.extend(rows)
 
         print(f"📄 {entity_name} page {page} rows: {len(rows)}")
 
-        url = result.get("@odata.nextLink")
+        url = res.get("@odata.nextLink")
         page += 1
 
     df = pd.DataFrame(all_rows)
@@ -95,7 +94,9 @@ def fetch_dataverse(entity_name, token):
 def clean_df(df):
     df = df.copy()
     df.columns = [
-        c.replace("@", "_").replace(".", "_").replace("-", "_")
+        c.replace("@", "_")
+         .replace(".", "_")
+         .replace("-", "_")
         for c in df.columns
     ]
     df.dropna(how="all", inplace=True)
@@ -108,11 +109,6 @@ def upload_to_gcs(df, folder_path, file_name):
     if df.empty:
         print(f"⚠️ No data to upload for {file_name}")
         return None
-
-    df = clean_df(df)
-
-    print("🔎 Sample data:")
-    print(df.head(2).to_dict(orient="records"))
 
     client = storage.Client()
     bucket = client.bucket(GCS_BUCKET)
@@ -133,19 +129,19 @@ def upload_to_gcs(df, folder_path, file_name):
     )
 
     print(f"📦 Uploaded NDJSON → gs://{GCS_BUCKET}/{gcs_path}")
-    print(f"📦 Row count written: {len(df)}")
+    print(f"📏 Rows written: {len(df)}")
     return gcs_path
 
-# ==================================
+# ================================
 # Main
-# ==================================
+# ================================
 if __name__ == "__main__":
     print("⏰ RUN PIPELINE (Asia/Bangkok)")
 
     token = get_access_token()
 
     for e in ENTITIES:
-        print(f"🚀 PROCESS {e['name'].upper()}")
+        print(f"\n🚀 PROCESS {e['name'].upper()}")
 
         df = fetch_dataverse(e["name"], token)
         df = clean_df(df)
@@ -156,4 +152,4 @@ if __name__ == "__main__":
             e["file_name"]
         )
 
-        print(f"✅ {e['name'].upper()} DONE\n")
+        print(f"✅ {e['name'].upper()} DONE")
